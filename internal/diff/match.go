@@ -14,6 +14,18 @@ import (
 // smallest |original.OldStart - candidate.OldStart| is chosen (ties broken by smaller
 // OldStart). Assigned current hunks are removed from the candidate pool.
 // Returns an error if any original hunk has no matching candidate.
+// MatchHunks maps original hunk indices to current hunk indices by content fingerprint.
+// It uses a greedy algorithm: for each original hunk (in order), it finds candidates
+// in the current hunks with matching fingerprints. If exactly one candidate exists,
+// it is assigned. If multiple candidates share the same fingerprint, the one with the
+// smallest |original.OldStart - candidate.OldStart| is chosen (ties broken by smaller
+// OldStart). Assigned current hunks are removed from the candidate pool.
+//
+// Fallback: if no exact fingerprint match is found, the algorithm tries content-subset
+// matching. This handles the case where git merges adjacent hunks after earlier commits
+// change line counts — a current hunk may contain all lines of the original hunk plus
+// lines from neighboring hunks. The candidate with the best OldStart proximity wins.
+// Returns an error if any original hunk has no matching candidate.
 func MatchHunks(original, current []Hunk) (map[int]int, error) {
 	// Build fingerprint -> list of current hunk indices.
 	pool := make(map[string][]int)
@@ -25,6 +37,9 @@ func MatchHunks(original, current []Hunk) (map[int]int, error) {
 		pool[fp] = append(pool[fp], i)
 	}
 
+	// Track which current hunks are already assigned (for subset fallback).
+	assigned := make(map[int]bool)
+
 	result := make(map[int]int, len(original))
 
 	for oi, oh := range original {
@@ -34,36 +49,48 @@ func MatchHunks(original, current []Hunk) (map[int]int, error) {
 		}
 
 		candidates, ok := pool[fp]
-		if !ok || len(candidates) == 0 {
-			return nil, output.NewExecutionError(
-				fmt.Sprintf("no matching hunk found for original hunk %d (old_start=%d)", oi, oh.OldStart),
-				"Hunk content changed between validation and execution. Re-run 'ac diff' and rebuild the plan.",
-			)
+		if ok && len(candidates) > 0 {
+			// Exact fingerprint match.
+			chosen := pickClosest(oh, candidates, current)
+			result[oi] = candidates[chosen]
+			assigned[candidates[chosen]] = true
+
+			// Remove assigned candidate from pool.
+			candidates[chosen] = candidates[len(candidates)-1]
+			pool[fp] = candidates[:len(candidates)-1]
+			continue
 		}
 
-		chosen := -1
-		if len(candidates) == 1 {
-			chosen = 0
-		} else {
-			// Disambiguate by smallest |original.OldStart - candidate.OldStart|,
-			// then smaller OldStart for ties.
-			bestDist := int64(math.MaxInt64)
-			bestStart := int64(math.MaxInt64)
-			for ci, idx := range candidates {
-				dist := abs64(oh.OldStart - current[idx].OldStart)
-				if dist < bestDist || (dist == bestDist && current[idx].OldStart < bestStart) {
+		// Fallback: content-subset matching.
+		// The original hunk's lines may be a subset of a merged current hunk.
+		bestIdx := -1
+		bestDist := int64(math.MaxInt64)
+		bestStart := int64(math.MaxInt64)
+		for ci, ch := range current {
+			if assigned[ci] {
+				continue
+			}
+			if containsAllLines(ch, oh) {
+				dist := abs64(oh.OldStart - ch.OldStart)
+				if dist < bestDist || (dist == bestDist && ch.OldStart < bestStart) {
 					bestDist = dist
-					bestStart = current[idx].OldStart
-					chosen = ci
+					bestStart = ch.OldStart
+					bestIdx = ci
 				}
 			}
 		}
 
-		result[oi] = candidates[chosen]
+		if bestIdx >= 0 {
+			result[oi] = bestIdx
+			// Do NOT remove from pool — merged hunks can match multiple originals.
+			// But mark as used for proximity fallback ordering.
+			continue
+		}
 
-		// Remove assigned candidate from pool.
-		candidates[chosen] = candidates[len(candidates)-1]
-		pool[fp] = candidates[:len(candidates)-1]
+		return nil, output.NewExecutionError(
+			fmt.Sprintf("no matching hunk found for original hunk %d (old_start=%d)", oi, oh.OldStart),
+			"Hunk content changed between validation and execution. Re-run 'ac diff' and rebuild the plan.",
+		)
 	}
 
 	return result, nil
@@ -74,4 +101,63 @@ func abs64(x int64) int64 {
 		return -x
 	}
 	return x
+}
+
+// pickClosest selects the candidate index closest to the original hunk by OldStart.
+func pickClosest(oh Hunk, candidates []int, current []Hunk) int {
+	if len(candidates) == 1 {
+		return 0
+	}
+	bestDist := int64(math.MaxInt64)
+	bestStart := int64(math.MaxInt64)
+	chosen := 0
+	for ci, idx := range candidates {
+		dist := abs64(oh.OldStart - current[idx].OldStart)
+		if dist < bestDist || (dist == bestDist && current[idx].OldStart < bestStart) {
+			bestDist = dist
+			bestStart = current[idx].OldStart
+			chosen = ci
+		}
+	}
+	return chosen
+}
+
+// containsAllLines checks if the current hunk contains all delete and add lines
+// from the original hunk, in order. This handles the case where git merges
+// adjacent hunks into one larger hunk.
+func containsAllLines(current, original Hunk) bool {
+	origDels := linesOfOp(original, OpDelete)
+	origAdds := linesOfOp(original, OpAdd)
+	curDels := linesOfOp(current, OpDelete)
+	curAdds := linesOfOp(current, OpAdd)
+
+	return isSubsequence(origDels, curDels) && isSubsequence(origAdds, curAdds)
+}
+
+// linesOfOp extracts line content for a given operation type.
+func linesOfOp(h Hunk, op LineOp) []string {
+	var lines []string
+	for _, l := range h.Lines {
+		if l.Op == op {
+			lines = append(lines, l.Content)
+		}
+	}
+	return lines
+}
+
+// isSubsequence checks if needle is a subsequence of haystack (same order, not necessarily contiguous).
+func isSubsequence(needle, haystack []string) bool {
+	if len(needle) == 0 {
+		return true
+	}
+	ni := 0
+	for _, h := range haystack {
+		if h == needle[ni] {
+			ni++
+			if ni == len(needle) {
+				return true
+			}
+		}
+	}
+	return false
 }
