@@ -86,7 +86,7 @@ func newRunCmd() *cobra.Command {
 func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACError) {
 	// --- Step 1: Ensure we are in a git repo ---
 	if err := runner.EnsureRepo(); err != nil {
-		return nil, output.NewExecutionError(
+		return nil, output.NewValidationError(
 			"not a git repository",
 			"Run ac from inside a git repository.",
 		)
