@@ -1,10 +1,13 @@
 # Build artifacts
-ac
+/ac
 *.exe
 
 # Review findings (generated during spec review)
 spec/*.ndjson
 spec/tasks.json
+
+# Snapshots
+*.snapshot
 
 # IDE
 .idea/
