@@ -361,6 +361,57 @@ func TestBuildPatch_SkipEqualCountHunk_DeltaZero(t *testing.T) {
 	}
 }
 
+// Test: BuildPatch emits "no newline" marker for lines without trailing \n
+func TestBuildPatch_NoNewlineAtEndOfFile(t *testing.T) {
+	hunks := []diff.Hunk{
+		{Index: 0, OldStart: 11, OldCount: 1, NewStart: 11, NewCount: 1, Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "func Handle5() { return }"},
+			{Op: diff.OpAdd, Content: "func Handle5() { fmt.Println(\"h5\") }"},
+		}},
+	}
+	file := baseFile()
+	file.Hunks = hunks
+
+	p, err := BuildPatch(file, []int{0}, hunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(p)
+
+	// Both delete and add lines lack trailing \n, so both should have the marker
+	if !strings.Contains(s, "\\ No newline at end of file") {
+		t.Errorf("expected 'No newline at end of file' marker, got:\n%s", s)
+	}
+
+	// Count occurrences -- should appear twice (after delete and after add)
+	count := strings.Count(s, "\\ No newline at end of file")
+	if count != 2 {
+		t.Errorf("expected 2 'No newline' markers, got %d in:\n%s", count, s)
+	}
+}
+
+// Test: BuildPatch does NOT emit "no newline" for lines WITH trailing \n
+func TestBuildPatch_WithNewline(t *testing.T) {
+	hunks := []diff.Hunk{
+		{Index: 0, OldStart: 4, OldCount: 1, NewStart: 4, NewCount: 1, Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "\t// old\n"},
+			{Op: diff.OpAdd, Content: "\t// new\n"},
+		}},
+	}
+	file := baseFile()
+	file.Hunks = hunks
+
+	p, err := BuildPatch(file, []int{0}, hunks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(p)
+
+	if strings.Contains(s, "No newline") {
+		t.Errorf("should NOT contain 'No newline' marker for lines with \\n, got:\n%s", s)
+	}
+}
+
 // Test 30: Single-line hunk -- count=1 handled correctly
 func TestBuildPatch_SingleLineHunk(t *testing.T) {
 	hunks := []diff.Hunk{
@@ -386,5 +437,183 @@ func TestBuildPatch_SingleLineHunk(t *testing.T) {
 	}
 	if !strings.Contains(s, "+new line") {
 		t.Errorf("expected add line, got:\n%s", s)
+	}
+}
+
+// Test: IsMergedHunk returns false for exact fingerprint match
+func TestIsMergedHunk_ExactMatch(t *testing.T) {
+	h := diff.Hunk{
+		Index: 0, OldStart: 10, OldCount: 1, NewStart: 10, NewCount: 2,
+		Fingerprint: "abc123",
+		Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "old\n"},
+			{Op: diff.OpAdd, Content: "new1\n"},
+			{Op: diff.OpAdd, Content: "new2\n"},
+		},
+	}
+	origs := []diff.Hunk{{Fingerprint: "abc123"}}
+	if IsMergedHunk(h, origs) {
+		t.Error("expected false for exact fingerprint match")
+	}
+}
+
+// Test: IsMergedHunk returns true when fingerprints differ
+func TestIsMergedHunk_Merged(t *testing.T) {
+	h := diff.Hunk{
+		Index: 0, OldStart: 10, OldCount: 2, NewStart: 10, NewCount: 4,
+		Fingerprint: "merged_fp",
+		Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "old1\n"},
+			{Op: diff.OpDelete, Content: "old2\n"},
+			{Op: diff.OpAdd, Content: "new1\n"},
+			{Op: diff.OpAdd, Content: "new2\n"},
+			{Op: diff.OpAdd, Content: "new3\n"},
+			{Op: diff.OpAdd, Content: "new4\n"},
+		},
+	}
+	origs := []diff.Hunk{
+		{Fingerprint: "orig_fp1"},
+		{Fingerprint: "orig_fp2"},
+	}
+	if !IsMergedHunk(h, origs) {
+		t.Error("expected true for merged hunk (different fingerprints)")
+	}
+}
+
+// Test: BuildCompositePatch with a merged hunk extracts correct sub-lines
+func TestBuildCompositePatch_MergedHunk(t *testing.T) {
+	// Simulate a merged hunk containing lines from two original hunks.
+	// The merged current hunk has: delete "A", add "B", "C", "D", "E"
+	// Original hunk 0 (commit's hunk): delete "A", add "B", "C"
+	// Original hunk 1 (other commit's hunk): add "D", "E"
+	mergedHunk := diff.Hunk{
+		Index: 0, OldStart: 10, OldCount: 1, NewStart: 10, NewCount: 5,
+		Fingerprint: "merged_fp",
+		Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "A\n"},
+			{Op: diff.OpAdd, Content: "B\n"},
+			{Op: diff.OpAdd, Content: "C\n"},
+			{Op: diff.OpAdd, Content: "D\n"},
+			{Op: diff.OpAdd, Content: "E\n"},
+		},
+	}
+
+	file := diff.FileDiff{
+		Path:    "test.go",
+		OldMode: "100644",
+		NewMode: "100644",
+		Hunks:   []diff.Hunk{mergedHunk},
+	}
+
+	// This commit only wants hunk 0's lines.
+	origForThisCommit := []diff.Hunk{
+		{
+			Fingerprint: "orig_fp_0",
+			Lines: []diff.Line{
+				{Op: diff.OpDelete, Content: "A\n"},
+				{Op: diff.OpAdd, Content: "B\n"},
+				{Op: diff.OpAdd, Content: "C\n"},
+			},
+		},
+	}
+
+	currentToOrigs := map[int][]diff.Hunk{
+		0: origForThisCommit,
+	}
+
+	patchBytes, err := BuildCompositePatch(file, []int{0}, file.Hunks, currentToOrigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(patchBytes)
+
+	// Should have old_count=1 (one delete), new_count=2 (two adds: B, C)
+	if !strings.Contains(s, "@@ -10,1 +10,2 @@") {
+		t.Errorf("expected sub-hunk header @@ -10,1 +10,2 @@, got:\n%s", s)
+	}
+
+	// Should contain the delete and the two adds from orig hunk 0
+	if !strings.Contains(s, "-A") {
+		t.Errorf("expected delete line -A, got:\n%s", s)
+	}
+	if !strings.Contains(s, "+B") {
+		t.Errorf("expected add line +B, got:\n%s", s)
+	}
+	if !strings.Contains(s, "+C") {
+		t.Errorf("expected add line +C, got:\n%s", s)
+	}
+
+	// Should NOT contain the adds from the other original hunk
+	if strings.Contains(s, "+D") {
+		t.Errorf("should NOT contain +D (belongs to other commit), got:\n%s", s)
+	}
+	if strings.Contains(s, "+E") {
+		t.Errorf("should NOT contain +E (belongs to other commit), got:\n%s", s)
+	}
+}
+
+// Test: BuildCompositePatch with mixed exact and merged hunks
+func TestBuildCompositePatch_MixedCase(t *testing.T) {
+	// Hunk 0: exact match (not merged)
+	exactHunk := diff.Hunk{
+		Index: 0, OldStart: 5, OldCount: 1, NewStart: 5, NewCount: 1,
+		Fingerprint: "exact_fp",
+		Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "old\n"},
+			{Op: diff.OpAdd, Content: "new\n"},
+		},
+	}
+	// Hunk 1: merged hunk
+	mergedHunk := diff.Hunk{
+		Index: 1, OldStart: 20, OldCount: 2, NewStart: 20, NewCount: 4,
+		Fingerprint: "merged_fp",
+		Lines: []diff.Line{
+			{Op: diff.OpDelete, Content: "X\n"},
+			{Op: diff.OpDelete, Content: "Y\n"},
+			{Op: diff.OpAdd, Content: "A\n"},
+			{Op: diff.OpAdd, Content: "B\n"},
+			{Op: diff.OpAdd, Content: "C\n"},
+			{Op: diff.OpAdd, Content: "D\n"},
+		},
+	}
+
+	file := diff.FileDiff{
+		Path:    "test.go",
+		OldMode: "100644",
+		NewMode: "100644",
+		Hunks:   []diff.Hunk{exactHunk, mergedHunk},
+	}
+
+	currentToOrigs := map[int][]diff.Hunk{
+		0: {{Fingerprint: "exact_fp"}}, // exact match
+		1: {{
+			Fingerprint: "orig_merged_fp",
+			Lines: []diff.Line{
+				{Op: diff.OpDelete, Content: "X\n"},
+				{Op: diff.OpAdd, Content: "A\n"},
+				{Op: diff.OpAdd, Content: "B\n"},
+			},
+		}},
+	}
+
+	patchBytes, err := BuildCompositePatch(file, []int{0, 1}, file.Hunks, currentToOrigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(patchBytes)
+
+	// Exact hunk should be emitted in full
+	if !strings.Contains(s, "@@ -5,1 +5,1 @@") {
+		t.Errorf("expected exact hunk header, got:\n%s", s)
+	}
+
+	// Merged hunk should only have sub-lines: 1 delete (X), 2 adds (A, B)
+	if !strings.Contains(s, "@@ -20,1 +20,2 @@") {
+		t.Errorf("expected merged sub-hunk header @@ -20,1 +20,2 @@, got:\n%s", s)
+	}
+
+	// Should NOT contain +C or +D or -Y (those belong to other commit)
+	if strings.Contains(s, "+C") || strings.Contains(s, "+D") || strings.Contains(s, "-Y") {
+		t.Errorf("should not contain lines from other commit, got:\n%s", s)
 	}
 }
