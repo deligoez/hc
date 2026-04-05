@@ -2,12 +2,15 @@ package cli
 
 import (
 	"os"
+	"runtime/debug"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/deligoez/ac/internal/output"
 )
+
+var version = "dev"
 
 var (
 	flagJSON    bool
@@ -18,6 +21,12 @@ var (
 )
 
 func NewRootCmd() *cobra.Command {
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+	}
+
 	root := &cobra.Command{
 		Use:   "ac",
 		Short: "ac -- agentic commits: hunk-based atomic commits for AI agents",
@@ -35,25 +44,17 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 
+	root.Version = version
+	root.SetVersionTemplate("ac version {{.Version}}\n")
+
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "Force JSON output")
 	root.PersistentFlags().BoolVar(&flagQuiet, "quiet", false, "Suppress info messages")
 	root.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable colors")
 
-	root.AddCommand(newVersionCmd())
 	root.AddCommand(newDiffCmd())
 	root.AddCommand(newRunCmd())
 
 	return root
-}
-
-func newVersionCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "version",
-		Short: "Show version",
-		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Println("ac version 0.1.0")
-		},
-	}
 }
 
 // Execute runs the root command.
