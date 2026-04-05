@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -65,9 +66,7 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				if acErr, ok := err.(*output.ACError); ok {
 					printer.PrintError(acErr)
-					cmd.SilenceUsage = true
-					cmd.SilenceErrors = true
-					return acErr
+					os.Exit(acErr.Code)
 				}
 				return err
 			}
@@ -138,7 +137,7 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 	if len(result.Files) == 0 {
 		return nil, output.NewValidationError(
 			"no uncommitted changes",
-			"make some changes and try again",
+			"There is nothing to commit.",
 		)
 	}
 
