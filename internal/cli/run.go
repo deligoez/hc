@@ -237,10 +237,12 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		return result, acErr
 	}
 
-	// Clean up intent-to-add entries that were consumed by commits.
-	// Any file that was committed no longer needs intent-to-add cleanup.
-	// Files that were NOT touched by any commit still need reverting.
-	revertIntent()
+	// After successful execution, do NOT revert intent-to-add entries.
+	// Files that were committed via git add (full-file mode) are now properly
+	// in the repository. Reverting them (git rm --cached) would corrupt the index.
+	// Files that were committed via hunk-select (git apply --cached) also
+	// have their content properly staged and committed.
+	// Only revert intent-to-add on FAILURE paths (already handled above).
 
 	return result, nil
 }
