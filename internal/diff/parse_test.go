@@ -336,6 +336,207 @@ index 1234567..abcdefg 100644
 	}
 }
 
+// Test: Fingerprint consistency -- same hunk content parsed from different diff
+// positions must produce identical fingerprints.
+func TestFingerprintConsistency(t *testing.T) {
+	// Simulate: original diff has 5 hunks. After applying hunks 0-2,
+	// re-diff produces hunks 3 and 4 with shifted line numbers.
+	// The fingerprint of original hunk 3 must match the re-diffed hunk for the same content.
+
+	// Original diff: 5 hunks, each deleting 1 line and adding 3 lines.
+	origDiff := `diff --git a/handlers.go b/handlers.go
+index 1234567..abcdefg 100644
+--- a/handlers.go
++++ b/handlers.go
+@@ -4 +4,3 @@
+-	// h1 old
++	// h1 new1
++	// h1 new2
++	// h1 new3
+@@ -8 +10,3 @@
+-	// h2 old
++	// h2 new1
++	// h2 new2
++	// h2 new3
+@@ -12 +16,3 @@
+-	// h3 old
++	// h3 new1
++	// h3 new2
++	// h3 new3
+@@ -16 +22,3 @@
+-	// h4 old
++	// h4 new1
++	// h4 new2
++	// h4 new3
+@@ -20 +28,3 @@
+-	// h5 old
++	// h5 new1
++	// h5 new2
++	// h5 new3
+`
+
+	// After applying hunks 0-2, re-diff shows hunks 3 and 4 with shifted positions
+	reDiff := `diff --git a/handlers.go b/handlers.go
+index abcdefg..1234567 100644
+--- a/handlers.go
++++ b/handlers.go
+@@ -20 +22,3 @@
+-	// h4 old
++	// h4 new1
++	// h4 new2
++	// h4 new3
+@@ -24 +28,3 @@
+-	// h5 old
++	// h5 new1
++	// h5 new2
++	// h5 new3
+`
+
+	origFiles, err := Parse(origDiff)
+	if err != nil {
+		t.Fatalf("parse original: %v", err)
+	}
+	reFiles, err := Parse(reDiff)
+	if err != nil {
+		t.Fatalf("parse re-diff: %v", err)
+	}
+
+	// Original hunk 3 (h4) should match re-diffed hunk 0
+	origHunk3 := origFiles[0].Hunks[3]
+	reHunk0 := reFiles[0].Hunks[0]
+
+	origFP := Fingerprint(origHunk3)
+	reFP := Fingerprint(reHunk0)
+
+	if origFP != reFP {
+		t.Errorf("fingerprint mismatch between original hunk 3 and re-diff hunk 0")
+		t.Logf("original hunk 3 lines:")
+		for i, l := range origHunk3.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+		t.Logf("re-diff hunk 0 lines:")
+		for i, l := range reHunk0.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+	}
+
+	// Original hunk 4 (h5) should match re-diffed hunk 1
+	origHunk4 := origFiles[0].Hunks[4]
+	reHunk1 := reFiles[0].Hunks[1]
+
+	origFP4 := Fingerprint(origHunk4)
+	reFP1 := Fingerprint(reHunk1)
+
+	if origFP4 != reFP1 {
+		t.Errorf("fingerprint mismatch between original hunk 4 and re-diff hunk 1")
+		t.Logf("original hunk 4 lines:")
+		for i, l := range origHunk4.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+		t.Logf("re-diff hunk 1 lines:")
+		for i, l := range reHunk1.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+	}
+}
+
+// Test: Fingerprint consistency with "no newline at end of file"
+func TestFingerprintConsistencyNoNewline(t *testing.T) {
+	// When the last hunk in a diff is the LAST thing in the stream,
+	// and there's a "no newline" marker, check fingerprint consistency.
+
+	// Original diff: last hunk has "no newline" marker
+	origDiff := "diff --git a/handlers.go b/handlers.go\nindex 1234567..abcdefg 100644\n--- a/handlers.go\n+++ b/handlers.go\n@@ -4 +4,3 @@\n-\t// h1 old\n+\t// h1 new1\n+\t// h1 new2\n+\t// h1 new3\n@@ -8 +10 @@\n-\t// h2 old\n\\ No newline at end of file\n+\t// h2 new\n\\ No newline at end of file\n"
+
+	// Re-diff: same hunk is the ONLY hunk, still has "no newline"
+	reDiff := "diff --git a/handlers.go b/handlers.go\nindex abcdefg..1234567 100644\n--- a/handlers.go\n+++ b/handlers.go\n@@ -8 +10 @@\n-\t// h2 old\n\\ No newline at end of file\n+\t// h2 new\n\\ No newline at end of file\n"
+
+	origFiles, err := Parse(origDiff)
+	if err != nil {
+		t.Fatalf("parse original: %v", err)
+	}
+	reFiles, err := Parse(reDiff)
+	if err != nil {
+		t.Fatalf("parse re-diff: %v", err)
+	}
+
+	origHunk1 := origFiles[0].Hunks[1]
+	reHunk0 := reFiles[0].Hunks[0]
+
+	origFP := Fingerprint(origHunk1)
+	reFP := Fingerprint(reHunk0)
+
+	if origFP != reFP {
+		t.Errorf("fingerprint mismatch with no-newline marker")
+		t.Logf("original hunk 1 lines:")
+		for i, l := range origHunk1.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+		t.Logf("re-diff hunk 0 lines:")
+		for i, l := range reHunk0.Lines {
+			t.Logf("  [%d] op=%d content=%q", i, l.Op, l.Content)
+		}
+	}
+}
+
+// Test: Line.Content trailing newline consistency across parse positions
+func TestLineContentTrailingNewline(t *testing.T) {
+	// Two diffs with identical hunk content, but the hunk appears at
+	// different positions (middle vs end of diff stream).
+
+	// Hunk at MIDDLE of diff (more hunks follow)
+	middleDiff := `diff --git a/f.go b/f.go
+index 1234567..abcdefg 100644
+--- a/f.go
++++ b/f.go
+@@ -4 +4 @@
+-	old target
++	new target
+@@ -10 +10 @@
+-	old other
++	new other
+`
+
+	// Same hunk at END of diff (last hunk, nothing follows)
+	endDiff := `diff --git a/f.go b/f.go
+index 1234567..abcdefg 100644
+--- a/f.go
++++ b/f.go
+@@ -4 +4 @@
+-	old target
++	new target
+`
+
+	middleFiles, err := Parse(middleDiff)
+	if err != nil {
+		t.Fatalf("parse middle: %v", err)
+	}
+	endFiles, err := Parse(endDiff)
+	if err != nil {
+		t.Fatalf("parse end: %v", err)
+	}
+
+	mHunk := middleFiles[0].Hunks[0]
+	eHunk := endFiles[0].Hunks[0]
+
+	// Check that line content is identical regardless of position
+	if len(mHunk.Lines) != len(eHunk.Lines) {
+		t.Fatalf("line count mismatch: middle=%d, end=%d", len(mHunk.Lines), len(eHunk.Lines))
+	}
+
+	for i := range mHunk.Lines {
+		if mHunk.Lines[i].Content != eHunk.Lines[i].Content {
+			t.Errorf("line %d content differs: middle=%q end=%q", i, mHunk.Lines[i].Content, eHunk.Lines[i].Content)
+		}
+	}
+
+	mFP := Fingerprint(mHunk)
+	eFP := Fingerprint(eHunk)
+	if mFP != eFP {
+		t.Errorf("fingerprint mismatch: middle=%s end=%s", mFP[:16], eFP[:16])
+	}
+}
+
 // Test 12: Handle empty diff -- returns empty slice, no error
 func TestParseEmptyDiff(t *testing.T) {
 	files, err := Parse("")
