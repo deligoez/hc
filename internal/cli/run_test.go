@@ -794,6 +794,631 @@ func TestRunUntrackedFileCleanStaging(t *testing.T) {
 	}
 }
 
+// Bug regression: 5 hunks split across 4 commits (2+1+1+1) should work
+func TestRunFiveHunksFourCommits(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// Create a file with 5 functions, each with multiple lines
+	original := `package handlers
+
+func Handle1() {
+	// h1 line1
+	// h1 line2
+	// h1 line3
+	// h1 line4
+	// h1 line5
+}
+
+func Handle2() {
+	// h2 line1
+	// h2 line2
+	// h2 line3
+	// h2 line4
+	// h2 line5
+}
+
+func Handle3() {
+	// h3 line1
+	// h3 line2
+	// h3 line3
+	// h3 line4
+	// h3 line5
+}
+
+func Handle4() {
+	// h4 line1
+	// h4 line2
+	// h4 line3
+	// h4 line4
+	// h4 line5
+}
+
+func Handle5() {
+	// h5 line1
+	// h5 line2
+	// h5 line3
+	// h5 line4
+	// h5 line5
+}
+`
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	// Modify all 5 functions (creating 5 hunks)
+	modified := `package handlers
+
+func Handle1() {
+	// h1 MODIFIED
+	// h1 line2
+	// h1 line3
+	// h1 line4
+	// h1 line5
+}
+
+func Handle2() {
+	// h2 MODIFIED
+	// h2 line2
+	// h2 line3
+	// h2 line4
+	// h2 line5
+}
+
+func Handle3() {
+	// h3 MODIFIED
+	// h3 line2
+	// h3 line3
+	// h3 line4
+	// h3 line5
+}
+
+func Handle4() {
+	// h4 MODIFIED
+	// h4 line2
+	// h4 line3
+	// h4 line4
+	// h4 line5
+}
+
+func Handle5() {
+	// h5 MODIFIED
+	// h5 line2
+	// h5 line3
+	// h5 line4
+	// h5 line5
+}
+`
+	writeFile(t, dir, "handlers.go", modified)
+
+	// Plan: commit 0 gets hunks [0,1], commit 1 gets [2], commit 2 gets [3], commit 3 gets [4]
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+
+	// Verify commit 0 has Handle1 and Handle2 changes
+	d0 := getCommitDiff(t, dir, result.Commits[0].SHA)
+	if !strings.Contains(d0, "h1 MODIFIED") {
+		t.Error("commit 0 should contain h1 MODIFIED")
+	}
+	if !strings.Contains(d0, "h2 MODIFIED") {
+		t.Error("commit 0 should contain h2 MODIFIED")
+	}
+
+	// Verify commit 1 has Handle3 changes
+	d1 := getCommitDiff(t, dir, result.Commits[1].SHA)
+	if !strings.Contains(d1, "h3 MODIFIED") {
+		t.Error("commit 1 should contain h3 MODIFIED")
+	}
+
+	// Verify commit 2 has Handle4 changes
+	d2 := getCommitDiff(t, dir, result.Commits[2].SHA)
+	if !strings.Contains(d2, "h4 MODIFIED") {
+		t.Error("commit 2 should contain h4 MODIFIED")
+	}
+
+	// Verify commit 3 has Handle5 changes
+	d3 := getCommitDiff(t, dir, result.Commits[3].SHA)
+	if !strings.Contains(d3, "h5 MODIFIED") {
+		t.Error("commit 3 should contain h5 MODIFIED")
+	}
+}
+
+// Bug regression: 5 hunks across 4 commits, file without trailing newline
+func TestRunFiveHunksFourCommitsNoTrailingNewline(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// File WITHOUT trailing newline
+	original := "package handlers\n\nfunc Handle1() {\n\t// h1 line1\n\t// h1 line2\n\t// h1 line3\n\t// h1 line4\n\t// h1 line5\n}\n\nfunc Handle2() {\n\t// h2 line1\n\t// h2 line2\n\t// h2 line3\n\t// h2 line4\n\t// h2 line5\n}\n\nfunc Handle3() {\n\t// h3 line1\n\t// h3 line2\n\t// h3 line3\n\t// h3 line4\n\t// h3 line5\n}\n\nfunc Handle4() {\n\t// h4 line1\n\t// h4 line2\n\t// h4 line3\n\t// h4 line4\n\t// h4 line5\n}\n\nfunc Handle5() {\n\t// h5 line1\n\t// h5 line2\n\t// h5 line3\n\t// h5 line4\n\t// h5 line5\n}"
+
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	// Modified, also without trailing newline
+	modified := "package handlers\n\nfunc Handle1() {\n\t// h1 MODIFIED\n\t// h1 line2\n\t// h1 line3\n\t// h1 line4\n\t// h1 line5\n}\n\nfunc Handle2() {\n\t// h2 MODIFIED\n\t// h2 line2\n\t// h2 line3\n\t// h2 line4\n\t// h2 line5\n}\n\nfunc Handle3() {\n\t// h3 MODIFIED\n\t// h3 line2\n\t// h3 line3\n\t// h3 line4\n\t// h3 line5\n}\n\nfunc Handle4() {\n\t// h4 MODIFIED\n\t// h4 line2\n\t// h4 line3\n\t// h4 line4\n\t// h4 line5\n}\n\nfunc Handle5() {\n\t// h5 MODIFIED\n\t// h5 line2\n\t// h5 line3\n\t// h5 line4\n\t// h5 line5\n}"
+
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+
+	d0 := getCommitDiff(t, dir, result.Commits[0].SHA)
+	if !strings.Contains(d0, "h1 MODIFIED") || !strings.Contains(d0, "h2 MODIFIED") {
+		t.Error("commit 0 should contain h1 and h2 MODIFIED")
+	}
+	d1 := getCommitDiff(t, dir, result.Commits[1].SHA)
+	if !strings.Contains(d1, "h3 MODIFIED") {
+		t.Error("commit 1 should contain h3 MODIFIED")
+	}
+	d2 := getCommitDiff(t, dir, result.Commits[2].SHA)
+	if !strings.Contains(d2, "h4 MODIFIED") {
+		t.Error("commit 2 should contain h4 MODIFIED")
+	}
+	d3 := getCommitDiff(t, dir, result.Commits[3].SHA)
+	if !strings.Contains(d3, "h5 MODIFIED") {
+		t.Error("commit 3 should contain h5 MODIFIED")
+	}
+}
+
+// Bug regression: 5 hunks with multi-line changes, split 2+1+1+1
+func TestRunFiveHunksMultiLineChanges(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// Each function has lines that will ALL be changed (multi-line hunks)
+	original := `package handlers
+
+func Handle1() {
+	oldA1 := "a1"
+	oldB1 := "b1"
+	_ = oldA1
+	_ = oldB1
+}
+
+func Handle2() {
+	oldA2 := "a2"
+	oldB2 := "b2"
+	_ = oldA2
+	_ = oldB2
+}
+
+func Handle3() {
+	oldA3 := "a3"
+	oldB3 := "b3"
+	_ = oldA3
+	_ = oldB3
+}
+
+func Handle4() {
+	oldA4 := "a4"
+	oldB4 := "b4"
+	_ = oldA4
+	_ = oldB4
+}
+
+func Handle5() {
+	oldA5 := "a5"
+	oldB5 := "b5"
+	_ = oldA5
+	_ = oldB5
+}
+`
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	// Replace multiple lines in each function
+	modified := `package handlers
+
+func Handle1() {
+	newA1 := "a1_new"
+	newB1 := "b1_new"
+	_ = newA1
+	_ = newB1
+}
+
+func Handle2() {
+	newA2 := "a2_new"
+	newB2 := "b2_new"
+	_ = newA2
+	_ = newB2
+}
+
+func Handle3() {
+	newA3 := "a3_new"
+	newB3 := "b3_new"
+	_ = newA3
+	_ = newB3
+}
+
+func Handle4() {
+	newA4 := "a4_new"
+	newB4 := "b4_new"
+	_ = newA4
+	_ = newB4
+}
+
+func Handle5() {
+	newA5 := "a5_new"
+	newB5 := "b5_new"
+	_ = newA5
+	_ = newB5
+}
+`
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+
+	d0 := getCommitDiff(t, dir, result.Commits[0].SHA)
+	if !strings.Contains(d0, "a1_new") || !strings.Contains(d0, "a2_new") {
+		t.Error("commit 0 should contain Handle1 and Handle2 changes")
+	}
+	d1 := getCommitDiff(t, dir, result.Commits[1].SHA)
+	if !strings.Contains(d1, "a3_new") {
+		t.Error("commit 1 should contain Handle3 changes")
+	}
+	d2 := getCommitDiff(t, dir, result.Commits[2].SHA)
+	if !strings.Contains(d2, "a4_new") {
+		t.Error("commit 2 should contain Handle4 changes")
+	}
+	d3 := getCommitDiff(t, dir, result.Commits[3].SHA)
+	if !strings.Contains(d3, "a5_new") {
+		t.Error("commit 3 should contain Handle5 changes")
+	}
+}
+
+// Bug regression: 5 hunks with net line-count changes (additions > deletions)
+func TestRunFiveHunksNetLineChanges(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// Each function body is short
+	original := `package handlers
+
+func Handle1() {
+	// h1 old
+}
+
+func Handle2() {
+	// h2 old
+}
+
+func Handle3() {
+	// h3 old
+}
+
+func Handle4() {
+	// h4 old
+}
+
+func Handle5() {
+	// h5 old
+}
+`
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	// Each modification ADDS extra lines (net +2 lines per hunk)
+	modified := `package handlers
+
+func Handle1() {
+	// h1 new line1
+	// h1 new line2
+	// h1 new line3
+}
+
+func Handle2() {
+	// h2 new line1
+	// h2 new line2
+	// h2 new line3
+}
+
+func Handle3() {
+	// h3 new line1
+	// h3 new line2
+	// h3 new line3
+}
+
+func Handle4() {
+	// h4 new line1
+	// h4 new line2
+	// h4 new line3
+}
+
+func Handle5() {
+	// h5 new line1
+	// h5 new line2
+	// h5 new line3
+}
+`
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+
+	d0 := getCommitDiff(t, dir, result.Commits[0].SHA)
+	if !strings.Contains(d0, "h1 new") || !strings.Contains(d0, "h2 new") {
+		t.Error("commit 0 should contain Handle1 and Handle2 changes")
+	}
+	d1 := getCommitDiff(t, dir, result.Commits[1].SHA)
+	if !strings.Contains(d1, "h3 new") {
+		t.Error("commit 1 should contain Handle3 changes")
+	}
+	d2 := getCommitDiff(t, dir, result.Commits[2].SHA)
+	if !strings.Contains(d2, "h4 new") {
+		t.Error("commit 2 should contain Handle4 changes")
+	}
+	d3 := getCommitDiff(t, dir, result.Commits[3].SHA)
+	if !strings.Contains(d3, "h5 new") {
+		t.Error("commit 3 should contain Handle5 changes")
+	}
+}
+
+// Bug regression: net line changes + no trailing newline
+func TestRunFiveHunksNetLineChangesNoNewline(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// File WITHOUT trailing newline, each function has 1 line body
+	original := "package handlers\n\nfunc Handle1() {\n\t// h1 old\n}\n\nfunc Handle2() {\n\t// h2 old\n}\n\nfunc Handle3() {\n\t// h3 old\n}\n\nfunc Handle4() {\n\t// h4 old\n}\n\nfunc Handle5() {\n\t// h5 old\n}"
+
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	// Each modification adds extra lines; file still has no trailing newline
+	modified := "package handlers\n\nfunc Handle1() {\n\t// h1 new line1\n\t// h1 new line2\n\t// h1 new line3\n}\n\nfunc Handle2() {\n\t// h2 new line1\n\t// h2 new line2\n\t// h2 new line3\n}\n\nfunc Handle3() {\n\t// h3 new line1\n\t// h3 new line2\n\t// h3 new line3\n}\n\nfunc Handle4() {\n\t// h4 new line1\n\t// h4 new line2\n\t// h4 new line3\n}\n\nfunc Handle5() {\n\t// h5 new line1\n\t// h5 new line2\n\t// h5 new line3\n}"
+
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+}
+
+// Bug regression: no trailing newline in file -- BuildPatch must emit
+// "\ No newline at end of file" markers for lines missing \n.
+func TestRunFiveHunksNoTrailingNewlineFile(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	original := "package handlers\n\nfunc Handle1() { return }\n\nfunc Handle2() { return }\n\nfunc Handle3() { return }\n\nfunc Handle4() { return }\n\nfunc Handle5() { return }"
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	modified := "package handlers\n\nfunc Handle1() { fmt.Println(\"h1\") }\n\nfunc Handle2() { fmt.Println(\"h2\") }\n\nfunc Handle3() { fmt.Println(\"h3\") }\n\nfunc Handle4() { fmt.Println(\"h4\") }\n\nfunc Handle5() { fmt.Println(\"h5\") }"
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+
+	d0 := getCommitDiff(t, dir, result.Commits[0].SHA)
+	if !strings.Contains(d0, "h1") || !strings.Contains(d0, "h2") {
+		t.Error("commit 0 should contain h1 and h2")
+	}
+	d1 := getCommitDiff(t, dir, result.Commits[1].SHA)
+	if !strings.Contains(d1, "h3") {
+		t.Error("commit 1 should contain h3")
+	}
+	d2 := getCommitDiff(t, dir, result.Commits[2].SHA)
+	if !strings.Contains(d2, "h4") {
+		t.Error("commit 2 should contain h4")
+	}
+	d3 := getCommitDiff(t, dir, result.Commits[3].SHA)
+	if !strings.Contains(d3, "h5") {
+		t.Error("commit 3 should contain h5")
+	}
+}
+
+// Variant: original has trailing newline but modified doesn't
+func TestRunFiveHunksModifiedNoTrailingNewline(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	original := "package handlers\n\nfunc Handle1() { return }\n\nfunc Handle2() { return }\n\nfunc Handle3() { return }\n\nfunc Handle4() { return }\n\nfunc Handle5() { return }\n"
+	writeFile(t, dir, "handlers.go", original)
+	must(t, run(r, "add", "handlers.go"))
+	must(t, run(r, "commit", "-m", "add handlers"))
+
+	modified := "package handlers\n\nfunc Handle1() { fmt.Println(\"h1\") }\n\nfunc Handle2() { fmt.Println(\"h2\") }\n\nfunc Handle3() { fmt.Println(\"h3\") }\n\nfunc Handle4() { fmt.Println(\"h4\") }\n\nfunc Handle5() { fmt.Println(\"h5\") }"
+	writeFile(t, dir, "handlers.go", modified)
+
+	plan := map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "fix: update Handle1 and Handle2",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{0, 1}}},
+			},
+			{
+				"message": "fix: update Handle3",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{2}}},
+			},
+			{
+				"message": "fix: update Handle4",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{3}}},
+			},
+			{
+				"message": "fix: update Handle5",
+				"files":   []map[string]any{{"path": "handlers.go", "hunks": []int{4}}},
+			},
+		},
+	}
+
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 4 {
+		t.Fatalf("expected 4 committed, got %d", result.Committed)
+	}
+}
+
 // Bug regression: two sequential ac run calls should both succeed
 func TestRunSequentialCalls(t *testing.T) {
 	dir, r := setupRepo(t)
