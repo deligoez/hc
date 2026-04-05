@@ -37,6 +37,24 @@ type FileResult struct {
 	Hunks    []int  `json:"hunks,omitempty"`
 }
 
+// DryRunResult is the JSON output for ac run --dry-run.
+type DryRunResult struct {
+	Valid         bool            `json:"valid"`
+	Commits       int             `json:"commits"`
+	Files         int             `json:"files"`
+	HunksTotal    int             `json:"hunks_total"`
+	HunksAssigned int             `json:"hunks_assigned"`
+	Issues        []DryRunIssue   `json:"issues"`
+}
+
+// DryRunIssue describes a validation issue in dry-run output.
+type DryRunIssue struct {
+	Type    string `json:"type"`
+	File    string `json:"file,omitempty"`
+	Message string `json:"message"`
+	Hint    string `json:"hint,omitempty"`
+}
+
 // ACError is a structured error with an exit code and hint.
 type ACError struct {
 	Message string `json:"error"`
