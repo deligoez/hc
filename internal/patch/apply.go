@@ -9,9 +9,3 @@ func Apply(runner *git.Runner, patch []byte) error {
 	_, err := runner.RunWithStdin(patch, "apply", "--cached", "--unidiff-zero")
 	return err
 }
-
-// ApplyCheck performs a dry-run of applying a patch to the git index.
-func ApplyCheck(runner *git.Runner, patch []byte) error {
-	_, err := runner.RunWithStdin(patch, "apply", "--cached", "--unidiff-zero", "--check")
-	return err
-}
