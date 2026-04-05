@@ -2,6 +2,7 @@ package plan
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -13,8 +14,8 @@ func Parse(data []byte) (*Plan, error) {
 	var p Plan
 	if err := json.Unmarshal(data, &p); err != nil {
 		return nil, output.NewValidationError(
-			"invalid JSON in plan",
-			"Ensure the plan is valid JSON. Check for trailing commas or unquoted keys.",
+			fmt.Sprintf("plan parse error: %v", err),
+			"Check JSON syntax. Plan must have a \"commits\" array.",
 		)
 	}
 
@@ -22,15 +23,15 @@ func Parse(data []byte) (*Plan, error) {
 	// key was absent, or an empty slice if it was `"commits": []`.
 	if p.Commits == nil {
 		return nil, output.NewValidationError(
-			"plan is missing the \"commits\" field",
-			"The plan must contain a \"commits\" array with at least one commit.",
+			"plan missing \"commits\" array",
+			"Plan must have a \"commits\" array with at least one commit.",
 		)
 	}
 
 	if len(p.Commits) == 0 {
 		return nil, output.NewValidationError(
-			"plan has an empty commits array",
-			"Provide at least one commit in the \"commits\" array.",
+			"plan has no commits",
+			"Add at least one commit to the \"commits\" array.",
 		)
 	}
 
