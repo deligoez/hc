@@ -377,14 +377,45 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 				return cr
 			}
 
-			// Collect matched current hunk indices.
-			currentSelectedIndices := make([]int, 0, len(f.Hunks))
-			for i := 0; i < len(origSubset); i++ {
-				currentSelectedIndices = append(currentSelectedIndices, matchMap[i])
+			// Group original hunks by their matched current hunk index.
+			currentToOrigs := make(map[int][]diff.Hunk)
+			for i, oh := range origSubset {
+				ci := matchMap[i]
+				currentToOrigs[ci] = append(currentToOrigs[ci], oh)
 			}
 
-			// Build adjusted patch.
-			patchBytes, err := patch.BuildPatch(currentFileDiff, currentSelectedIndices, currentFileDiff.Hunks)
+			// Collect unique matched current hunk indices (preserve order).
+			dedupSeen := make(map[int]bool)
+			currentSelectedIndices := make([]int, 0, len(f.Hunks))
+			for i := 0; i < len(origSubset); i++ {
+				idx := matchMap[i]
+				if !dedupSeen[idx] {
+					currentSelectedIndices = append(currentSelectedIndices, idx)
+					dedupSeen[idx] = true
+				}
+			}
+
+			// Check if any selected current hunk is a merged hunk (matched via
+			// content-subset rather than exact fingerprint). Merged hunks contain
+			// lines from multiple original hunks; we must extract only our lines.
+			hasMerged := false
+			for _, ci := range currentSelectedIndices {
+				if patch.IsMergedHunk(currentFileDiff.Hunks[ci], currentToOrigs[ci]) {
+					hasMerged = true
+					break
+				}
+			}
+
+			var patchBytes []byte
+			if !hasMerged {
+				// Normal case: all matches are exact. Use standard BuildPatch.
+				patchBytes, err = patch.BuildPatch(currentFileDiff, currentSelectedIndices, currentFileDiff.Hunks)
+			} else {
+				// Merged case: at least one current hunk is merged. Build a
+				// composite patch with sub-patches for merged hunks and full
+				// hunks for exact matches.
+				patchBytes, err = patch.BuildCompositePatch(currentFileDiff, currentSelectedIndices, currentFileDiff.Hunks, currentToOrigs)
+			}
 			if err != nil {
 				cr.Status = "failed"
 				cr.Error = fmt.Sprintf("cannot build patch for %s: %v", f.Path, err)
@@ -560,14 +591,39 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 					)
 				}
 
-				// Collect matched current hunk indices.
-				selectedCurrentIndices := make([]int, 0, len(f.Hunks))
-				for i := 0; i < len(origSubset); i++ {
-					selectedCurrentIndices = append(selectedCurrentIndices, matchMap[i])
+				// Group original hunks by their matched current hunk index.
+				currentToOrigs := make(map[int][]diff.Hunk)
+				for i, oh := range origSubset {
+					ci := matchMap[i]
+					currentToOrigs[ci] = append(currentToOrigs[ci], oh)
 				}
 
-				// Build a patch using the current file's hunks.
-				patchData, err := patch.BuildPatch(currentFile, selectedCurrentIndices, currentFile.Hunks)
+				// Collect unique matched current hunk indices (preserve order).
+				seen := make(map[int]bool)
+				selectedCurrentIndices := make([]int, 0, len(f.Hunks))
+				for i := 0; i < len(origSubset); i++ {
+					idx := matchMap[i]
+					if !seen[idx] {
+						selectedCurrentIndices = append(selectedCurrentIndices, idx)
+						seen[idx] = true
+					}
+				}
+
+				// Check if any selected current hunk is merged.
+				hasMerged := false
+				for _, ci := range selectedCurrentIndices {
+					if patch.IsMergedHunk(currentFile.Hunks[ci], currentToOrigs[ci]) {
+						hasMerged = true
+						break
+					}
+				}
+
+				var patchData []byte
+				if !hasMerged {
+					patchData, err = patch.BuildPatch(currentFile, selectedCurrentIndices, currentFile.Hunks)
+				} else {
+					patchData, err = patch.BuildCompositePatch(currentFile, selectedCurrentIndices, currentFile.Hunks, currentToOrigs)
+				}
 				if err != nil {
 					return output.NewExecutionError(
 						fmt.Sprintf("validation failed at commit %d: cannot build patch for %s: %v", ci, f.Path, err),
