@@ -50,19 +50,26 @@ func newRunCmd() *cobra.Command {
 				os.Exit(acErr.Code)
 			}
 
-			if printer.UseJSON() {
-				printer.PrintJSON(result)
-			} else {
-				if dryRun {
-					printer.Info("dry-run: plan is valid (%d commits, %d files, %d hunks)",
-						result.Total, countFiles(result), countHunks(result))
+			if dryRun {
+				dr := result.(*output.DryRunResult)
+				if printer.UseJSON() {
+					printer.PrintJSON(dr)
 				} else {
-					for _, cr := range result.Commits {
+					printer.Info("Dry run: %d commits, %d files, %d hunks", dr.Commits, dr.Files, dr.HunksTotal)
+					printer.Info("Coverage: %d/%d hunks assigned, 0 unplanned files", dr.HunksAssigned, dr.HunksTotal)
+					printer.Info("Plan valid: %d commits would be created", dr.Commits)
+				}
+			} else {
+				r := result.(*output.Result)
+				if printer.UseJSON() {
+					printer.PrintJSON(r)
+				} else {
+					for _, cr := range r.Commits {
 						if cr.Status == "committed" {
 							printer.Info("[%d] %s %s", cr.Index, cr.SHA, cr.Message)
 						}
 					}
-					printer.Info("committed %d/%d", result.Committed, result.Total)
+					printer.Info("committed %d/%d", r.Committed, r.Total)
 				}
 			}
 
@@ -76,7 +83,7 @@ func newRunCmd() *cobra.Command {
 }
 
 // runPlan validates and (in Phase 2) executes a commit plan.
-func runPlan(planData []byte, runner *git.Runner, dryRun bool) (*output.Result, *output.ACError) {
+func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACError) {
 	// --- Step 1: Ensure we are in a git repo ---
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewExecutionError(
@@ -162,7 +169,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (*output.Result, 
 		revertIntent()
 		return nil, output.NewValidationError(
 			"staging area is not clean",
-			"Commit or reset staged changes before running ac.",
+			"Run 'git reset HEAD' first. ac requires a clean staging area.",
 		)
 	}
 
@@ -183,6 +190,15 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (*output.Result, 
 		return nil, output.NewExecutionError(
 			fmt.Sprintf("failed to parse diff: %v", err),
 			"",
+		)
+	}
+
+	// --- Step 6b: Check for no changes ---
+	if len(parsedFiles) == 0 && len(intentAdded) == 0 {
+		revertIntent()
+		return nil, output.NewValidationError(
+			"no uncommitted changes",
+			"There is nothing to commit.",
 		)
 	}
 
@@ -211,7 +227,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (*output.Result, 
 	// --- Dry-run exit ---
 	if dryRun {
 		revertIntent()
-		result := buildDryRunResult(p)
+		result := buildDryRunResult(p, parsedFiles)
 		return result, nil
 	}
 
@@ -378,8 +394,8 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 			// Apply patch to the real index.
 			if err := patch.Apply(runner, patchBytes); err != nil {
 				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("cannot apply patch for %s: %v", f.Path, err)
-				cr.Hint = "The patch may conflict with previously staged hunks."
+				cr.Error = fmt.Sprintf("git apply failed for %s: %v", f.Path, err)
+				cr.Hint = "Working tree may have changed during execution. Run 'git reset HEAD --' and retry."
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
 				return cr
@@ -393,8 +409,8 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 	sha, err := runner.Commit(commit.Message)
 	if err != nil {
 		cr.Status = "failed"
-		cr.Error = fmt.Sprintf("commit failed: %v", err)
-		cr.Hint = "A commit hook may have rejected the commit. Staging is left intact for manual inspection."
+		cr.Error = fmt.Sprintf("git commit failed: %v", err)
+		cr.Hint = fmt.Sprintf("Staging is intact. If a pre-commit hook failed, fix the issue and run 'git commit -m \"%s\"' manually, then re-plan remaining changes.", commit.Message)
 		// Do NOT reset staging on commit failure (leave intact for manual fix).
 		return cr
 	}
@@ -627,55 +643,41 @@ func collectFullFilePaths(p *plan.Plan) []string {
 	return paths
 }
 
-// buildDryRunResult creates a Result for dry-run output.
-func buildDryRunResult(p *plan.Plan) *output.Result {
-	result := &output.Result{
-		Committed: 0,
-		Total:     len(p.Commits),
+// buildDryRunResult creates a DryRunResult for dry-run output.
+func buildDryRunResult(p *plan.Plan, parsedFiles []diff.FileDiff) *output.DryRunResult {
+	// Count total hunks in the diff
+	hunksTotal := 0
+	for _, f := range parsedFiles {
+		hunksTotal += len(f.Hunks)
 	}
 
-	for i, c := range p.Commits {
-		cr := output.CommitResult{
-			Index:   i,
-			Message: c.Message,
-			Status:  "pending",
-		}
+	// Count assigned hunks from the plan
+	hunksAssigned := 0
+	fileSet := make(map[string]bool)
+	for _, c := range p.Commits {
 		for _, f := range c.Files {
-			fr := output.FileResult{
-				Path:  f.Path,
-				Hunks: f.Hunks,
-			}
+			fileSet[f.Path] = true
 			if f.IsFullFile() {
-				fr.Strategy = "full"
+				// Full-file covers all hunks for that file
+				for _, df := range parsedFiles {
+					if df.Path == f.Path {
+						hunksAssigned += len(df.Hunks)
+						break
+					}
+				}
 			} else {
-				fr.Strategy = "hunks"
-			}
-			cr.Files = append(cr.Files, fr)
-		}
-		result.Commits = append(result.Commits, cr)
-	}
-
-	return result
-}
-
-// countFiles counts the total number of file entries across all commits.
-func countFiles(r *output.Result) int {
-	n := 0
-	for _, c := range r.Commits {
-		n += len(c.Files)
-	}
-	return n
-}
-
-// countHunks counts the total number of hunk-select entries across all commits.
-func countHunks(r *output.Result) int {
-	n := 0
-	for _, c := range r.Commits {
-		for _, f := range c.Files {
-			if len(f.Hunks) > 0 {
-				n += len(f.Hunks)
+				hunksAssigned += len(f.Hunks)
 			}
 		}
 	}
-	return n
+
+	return &output.DryRunResult{
+		Valid:         true,
+		Commits:       len(p.Commits),
+		Files:         len(fileSet),
+		HunksTotal:    hunksTotal,
+		HunksAssigned: hunksAssigned,
+		Issues:        []output.DryRunIssue{},
+	}
 }
+
