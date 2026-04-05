@@ -1,0 +1,116 @@
+package output
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/fatih/color"
+	"github.com/mattn/go-isatty"
+)
+
+// Result is the top-level output for ac run.
+type Result struct {
+	Committed int            `json:"committed"`
+	Total     int            `json:"total"`
+	Commits   []CommitResult `json:"commits"`
+	Error     string         `json:"error,omitempty"`
+	Hint      string         `json:"hint,omitempty"`
+}
+
+// CommitResult is the output for a single commit.
+type CommitResult struct {
+	Index   int          `json:"index"`
+	Message string       `json:"message"`
+	SHA     string       `json:"sha,omitempty"`
+	Status  string       `json:"status"` // "committed" or "failed"
+	Files   []FileResult `json:"files"`
+	Error   string       `json:"error,omitempty"`
+	Hint    string       `json:"hint,omitempty"`
+}
+
+// FileResult is the output for a single file within a commit.
+type FileResult struct {
+	Path     string `json:"path"`
+	Strategy string `json:"strategy"` // "full" or "hunks"
+	Hunks    []int  `json:"hunks,omitempty"`
+}
+
+// ACError is a structured error with an exit code and hint.
+type ACError struct {
+	Message string `json:"error"`
+	Code    int    `json:"code"`
+	Hint    string `json:"hint"`
+}
+
+func (e *ACError) Error() string {
+	return e.Message
+}
+
+// NewValidationError creates a validation error (exit 2).
+func NewValidationError(message, hint string) *ACError {
+	return &ACError{Message: message, Code: 2, Hint: hint}
+}
+
+// NewExecutionError creates an execution error (exit 3).
+func NewExecutionError(message, hint string) *ACError {
+	return &ACError{Message: message, Code: 3, Hint: hint}
+}
+
+// Printer handles TTY vs JSON output.
+type Printer struct {
+	Out       io.Writer
+	ErrOut    io.Writer
+	IsTTY     bool
+	ForceJSON bool
+	Quiet     bool
+	NoColor   bool
+}
+
+// NewPrinter creates a printer with auto-detected TTY mode.
+func NewPrinter() *Printer {
+	isTTY := isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+	return &Printer{
+		Out:    os.Stdout,
+		ErrOut: os.Stderr,
+		IsTTY:  isTTY,
+	}
+}
+
+// UseJSON returns true if output should be JSON.
+func (p *Printer) UseJSON() bool {
+	return p.ForceJSON || !p.IsTTY
+}
+
+// PrintJSON outputs a value as JSON.
+func (p *Printer) PrintJSON(v any) error {
+	enc := json.NewEncoder(p.Out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
+// PrintError outputs a structured error.
+func (p *Printer) PrintError(err *ACError) {
+	if p.UseJSON() {
+		p.PrintJSON(err)
+		return
+	}
+	if !p.NoColor {
+		color.New(color.FgRed, color.Bold).Fprintf(p.ErrOut, "error: ")
+	} else {
+		fmt.Fprint(p.ErrOut, "error: ")
+	}
+	fmt.Fprintln(p.ErrOut, err.Message)
+	if err.Hint != "" {
+		fmt.Fprintln(p.ErrOut, "hint:", err.Hint)
+	}
+}
+
+// Info prints an informational message (suppressed by --quiet).
+func (p *Printer) Info(format string, args ...any) {
+	if p.Quiet {
+		return
+	}
+	fmt.Fprintf(p.Out, format+"\n", args...)
+}
