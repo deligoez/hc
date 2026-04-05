@@ -1,0 +1,12 @@
+# Build artifacts
+ac
+*.exe
+
+# Review findings (generated during spec review)
+spec/*.ndjson
+spec/tasks.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
