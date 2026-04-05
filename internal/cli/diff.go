@@ -87,6 +87,14 @@ func newDiffCmd() *cobra.Command {
 
 // runDiff executes the core diff logic and returns the result.
 func runDiff(runner *git.Runner) (*diffResult, error) {
+	// Ensure we're in a git repository
+	if err := runner.EnsureRepo(); err != nil {
+		return nil, output.NewValidationError(
+			"not a git repository",
+			"Run ac from inside a git repository.",
+		)
+	}
+
 	// Get unstaged diff
 	raw, err := runner.Diff("-U0", "-M", "--no-ext-diff")
 	if err != nil {
