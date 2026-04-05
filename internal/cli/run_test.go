@@ -677,14 +677,72 @@ func TestRunDryRun(t *testing.T) {
 	}
 }
 
-// Test 66: Stdin input -- covered by the fact we test runPlan directly with bytes
+// Test 66: Stdin input -- end-to-end test via runPlan with []byte (same path as stdin)
 func TestRunStdinInput(t *testing.T) {
-	// This is implicitly covered: runPlan takes []byte which can come from stdin or file.
-	// We verify by calling runPlan directly with JSON bytes, which is the same code path.
-	t.Log("stdin input is covered by all tests calling runPlan with []byte directly")
+	dir, r := setupRepo(t)
+
+	// Create base file and commit
+	writeFile(t, dir, "stdin.go", "package main\n\nfunc Old() {}\n")
+	must(t, run(r, "add", "stdin.go"))
+	must(t, run(r, "commit", "-m", "add stdin"))
+
+	// Modify
+	writeFile(t, dir, "stdin.go", "package main\n\nfunc Old() {}\n\nfunc New() {}\n")
+
+	planJSON := makePlanJSON(t, map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "feat: add New via stdin path",
+				"files":   []map[string]any{{"path": "stdin.go"}},
+			},
+		},
+	})
+
+	// Call runPlan directly with []byte -- this is the same path used by stdin
+	rawResult, acErr := runPlan(planJSON, r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+
+	if result.Committed != 1 {
+		t.Fatalf("expected 1 committed, got %d", result.Committed)
+	}
+
+	logs := readGitLog(t, dir)
+	found := false
+	for _, l := range logs {
+		if l == "feat: add New via stdin path" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("commit message not found in log: %v", logs)
+	}
 }
 
-// Test 67: TTY vs pipe output -- skip
+// Test 67: TTY vs pipe output -- unit test of Printer.UseJSON logic
 func TestRunTTYVsPipeOutput(t *testing.T) {
-	t.Skip("TTY vs pipe output format is handled by output tests")
+	// When ForceJSON is set, UseJSON should return true regardless of IsTTY
+	p := &output.Printer{ForceJSON: true, IsTTY: true}
+	if !p.UseJSON() {
+		t.Error("expected UseJSON()=true when ForceJSON is set")
+	}
+
+	p = &output.Printer{ForceJSON: true, IsTTY: false}
+	if !p.UseJSON() {
+		t.Error("expected UseJSON()=true when ForceJSON is set and not TTY")
+	}
+
+	// When IsTTY is true and ForceJSON is false, UseJSON should return false
+	p = &output.Printer{IsTTY: true, ForceJSON: false}
+	if p.UseJSON() {
+		t.Error("expected UseJSON()=false when IsTTY is true and ForceJSON is false")
+	}
+
+	// When neither IsTTY nor ForceJSON, UseJSON should return true (pipe mode)
+	p = &output.Printer{IsTTY: false, ForceJSON: false}
+	if !p.UseJSON() {
+		t.Error("expected UseJSON()=true when not TTY (pipe mode)")
+	}
 }
