@@ -746,3 +746,102 @@ func TestRunTTYVsPipeOutput(t *testing.T) {
 		t.Error("expected UseJSON()=true when not TTY (pipe mode)")
 	}
 }
+
+// Bug regression: untracked file commit should leave clean staging area
+func TestRunUntrackedFileCleanStaging(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	// Create a tracked file with changes AND an untracked new file
+	writeFile(t, dir, "existing.go", "package main\n\nfunc Existing() {}\n")
+	must(t, run(r, "add", "existing.go"))
+	must(t, run(r, "commit", "-m", "add existing"))
+	writeFile(t, dir, "existing.go", "package main\n\nfunc Existing() {}\n\nfunc Modified() {}\n")
+	writeFile(t, dir, "brand_new.go", "package main\n\nfunc BrandNew() {}\n")
+
+	// Commit only the new file, allow_unplanned the existing changes
+	planData := makePlanJSON(t, map[string]any{
+		"commits": []map[string]any{
+			{
+				"message": "feat: add brand_new",
+				"files":   []map[string]any{{"path": "brand_new.go"}},
+			},
+		},
+		"allow_unplanned": []string{"existing.go"},
+	})
+
+	rawResult, acErr := runPlan(planData, r, false)
+	if acErr != nil {
+		t.Fatalf("runPlan failed: %v", acErr)
+	}
+	result := asResult(t, rawResult)
+	if result.Committed != 1 {
+		t.Fatalf("expected 1 committed, got %d", result.Committed)
+	}
+
+	// Key assertion: staging area must be clean after successful run
+	cachedOut, err := r.Run("diff", "--cached", "--stat")
+	if err != nil {
+		t.Fatalf("git diff --cached failed: %v", err)
+	}
+	if strings.TrimSpace(cachedOut) != "" {
+		t.Fatalf("staging area is not clean after run: %s", cachedOut)
+	}
+
+	// The unplanned file should still have uncommitted changes
+	statusOut, _ := r.Run("status", "--porcelain")
+	if !strings.Contains(statusOut, "existing.go") {
+		t.Error("existing.go should still have uncommitted changes")
+	}
+}
+
+// Bug regression: two sequential ac run calls should both succeed
+func TestRunSequentialCalls(t *testing.T) {
+	dir, r := setupRepo(t)
+
+	writeFile(t, dir, "a.go", "package main\n\nfunc A() {}\n")
+	must(t, run(r, "add", "a.go"))
+	must(t, run(r, "commit", "-m", "add a"))
+
+	// First run: commit a change
+	writeFile(t, dir, "a.go", "package main\n\nfunc A() {}\n\nfunc A2() {}\n")
+	writeFile(t, dir, "b.go", "package main\n\nfunc B() {}\n")
+
+	plan1 := makePlanJSON(t, map[string]any{
+		"commits": []map[string]any{
+			{"message": "feat: add A2", "files": []map[string]any{{"path": "a.go"}}},
+		},
+		"allow_unplanned": []string{"b.go"},
+	})
+
+	_, acErr := runPlan(plan1, r, false)
+	if acErr != nil {
+		t.Fatalf("first runPlan failed: %v", acErr)
+	}
+
+	// Second run: commit the other file (should not fail due to dirty staging)
+	plan2 := makePlanJSON(t, map[string]any{
+		"commits": []map[string]any{
+			{"message": "feat: add B", "files": []map[string]any{{"path": "b.go"}}},
+		},
+	})
+
+	_, acErr = runPlan(plan2, r, false)
+	if acErr != nil {
+		t.Fatalf("second runPlan failed: %v", acErr)
+	}
+
+	// Verify both commits exist
+	logs := readGitLog(t, dir)
+	foundA2, foundB := false, false
+	for _, l := range logs {
+		if l == "feat: add A2" {
+			foundA2 = true
+		}
+		if l == "feat: add B" {
+			foundB = true
+		}
+	}
+	if !foundA2 || !foundB {
+		t.Fatalf("expected both commits in log, got: %v", logs)
+	}
+}
