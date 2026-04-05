@@ -3,6 +3,8 @@ package diff
 import (
 	"fmt"
 	"math"
+
+	"github.com/deligoez/ac/internal/output"
 )
 
 // MatchHunks maps original hunk indices to current hunk indices by content fingerprint.
@@ -33,7 +35,10 @@ func MatchHunks(original, current []Hunk) (map[int]int, error) {
 
 		candidates, ok := pool[fp]
 		if !ok || len(candidates) == 0 {
-			return nil, fmt.Errorf("no matching hunk found for original hunk %d (old_start=%d)", oi, oh.OldStart)
+			return nil, output.NewExecutionError(
+				fmt.Sprintf("no matching hunk found for original hunk %d (old_start=%d)", oi, oh.OldStart),
+				"Hunk content changed between validation and execution. Re-run 'ac diff' and rebuild the plan.",
+			)
 		}
 
 		chosen := -1
