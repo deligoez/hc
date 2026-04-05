@@ -528,7 +528,7 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 					currentFile.Hunks[j].Fingerprint = diff.Fingerprint(currentFile.Hunks[j])
 				}
 
-				// Build a fingerprint map from the original parsed diff for this file.
+				// Get the original file diff for matching.
 				origFile, ok := diffMap[f.Path]
 				if !ok {
 					return output.NewExecutionError(
@@ -537,36 +537,31 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 					)
 				}
 
-				// Map original hunk indices to fingerprints.
-				origFPMap := make(map[string]int, len(origFile.Hunks))
-				for _, h := range origFile.Hunks {
-					origFPMap[h.Fingerprint] = h.Index
-				}
-
-				// Map current fingerprints to current hunk indices.
-				currentFPMap := make(map[string]int, len(currentFile.Hunks))
-				for _, h := range currentFile.Hunks {
-					currentFPMap[h.Fingerprint] = h.Index
-				}
-
-				// Find which current hunk indices to select.
-				var selectedCurrentIndices []int
-				for _, origIdx := range f.Hunks {
-					if origIdx >= len(origFile.Hunks) {
+				// Build subset of original hunks that this file entry references.
+				origSubset := make([]diff.Hunk, 0, len(f.Hunks))
+				for _, hunkIdx := range f.Hunks {
+					if hunkIdx >= len(origFile.Hunks) {
 						return output.NewExecutionError(
-							fmt.Sprintf("validation failed at commit %d: hunk %d out of range for %s", ci, origIdx, f.Path),
+							fmt.Sprintf("validation failed at commit %d: hunk %d out of range for %s", ci, hunkIdx, f.Path),
 							"",
 						)
 					}
-					fp := origFile.Hunks[origIdx].Fingerprint
-					currentIdx, found := currentFPMap[fp]
-					if !found {
-						return output.NewExecutionError(
-							fmt.Sprintf("validation failed at commit %d: hunk %d of %s not found in current diff (fingerprint mismatch)", ci, origIdx, f.Path),
-							"A previous commit may have consumed or altered this hunk.",
-						)
-					}
-					selectedCurrentIndices = append(selectedCurrentIndices, currentIdx)
+					origSubset = append(origSubset, origFile.Hunks[hunkIdx])
+				}
+
+				// Match original hunks to current hunks using MatchHunks.
+				matchMap, err := diff.MatchHunks(origSubset, currentFile.Hunks)
+				if err != nil {
+					return output.NewExecutionError(
+						fmt.Sprintf("validation failed at commit %d: hunk matching failed for %s: %v", ci, f.Path, err),
+						"A previous commit may have consumed or altered this hunk.",
+					)
+				}
+
+				// Collect matched current hunk indices.
+				selectedCurrentIndices := make([]int, 0, len(f.Hunks))
+				for i := 0; i < len(origSubset); i++ {
+					selectedCurrentIndices = append(selectedCurrentIndices, matchMap[i])
 				}
 
 				// Build a patch using the current file's hunks.
@@ -581,8 +576,8 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 				// Apply the patch to the temp index.
 				if err := patch.Apply(tempRunner, patchData); err != nil {
 					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: cannot apply patch for %s: %v", ci, f.Path, err),
-						"The patch may conflict with previously staged hunks.",
+						fmt.Sprintf("patch validation failed for %s hunks %v: %v", f.Path, f.Hunks, err),
+						"This may indicate a diff parsing issue. Run 'ac diff' to inspect the current state.",
 					)
 				}
 			}
