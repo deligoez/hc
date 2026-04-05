@@ -8,7 +8,28 @@ import (
 	"testing"
 
 	"github.com/deligoez/ac/internal/git"
+	"github.com/deligoez/ac/internal/output"
 )
+
+// asResult type-asserts the runPlan result to *output.Result (for non-dry-run).
+func asResult(t *testing.T, v any) *output.Result {
+	t.Helper()
+	r, ok := v.(*output.Result)
+	if !ok {
+		t.Fatalf("expected *output.Result, got %T", v)
+	}
+	return r
+}
+
+// asDryRun type-asserts the runPlan result to *output.DryRunResult.
+func asDryRun(t *testing.T, v any) *output.DryRunResult {
+	t.Helper()
+	r, ok := v.(*output.DryRunResult)
+	if !ok {
+		t.Fatalf("expected *output.DryRunResult, got %T", v)
+	}
+	return r
+}
 
 // --- Helpers ---
 
@@ -88,10 +109,11 @@ func TestRunSingleCommitSingleFullFile(t *testing.T) {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 1 {
 		t.Fatalf("expected 1 committed, got %d", result.Committed)
@@ -139,10 +161,11 @@ func TestRunSingleCommitMultipleFullFiles(t *testing.T) {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 1 {
 		t.Fatalf("expected 1 committed, got %d", result.Committed)
@@ -235,10 +258,11 @@ func existing3() {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 2 {
 		t.Fatalf("expected 2 committed, got %d", result.Committed)
@@ -330,10 +354,11 @@ func funcA2() {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 3 {
 		t.Fatalf("expected 3 committed, got %d", result.Committed)
@@ -450,10 +475,11 @@ func f5() {
 
 	plan := map[string]any{"commits": commits}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 5 {
 		t.Fatalf("expected 5 committed, got %d", result.Committed)
@@ -504,10 +530,11 @@ func TestRunNewFileUntracked(t *testing.T) {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 1 {
 		t.Fatalf("expected 1 committed, got %d", result.Committed)
@@ -544,10 +571,11 @@ func TestRunDeletedFile(t *testing.T) {
 		},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 1 {
 		t.Fatalf("expected 1 committed, got %d", result.Committed)
@@ -586,10 +614,11 @@ func TestRunAllowUnplanned(t *testing.T) {
 		"allow_unplanned": []string{"unplanned.go"},
 	}
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, false)
+	rawResult, acErr := runPlan(makePlanJSON(t, plan), r, false)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asResult(t, rawResult)
 
 	if result.Committed != 1 {
 		t.Fatalf("expected 1 committed, got %d", result.Committed)
@@ -624,31 +653,27 @@ func TestRunDryRun(t *testing.T) {
 	// Get HEAD before
 	headBefore := strings.TrimSpace(gitHelper(t, dir, "rev-parse", "HEAD"))
 
-	result, acErr := runPlan(makePlanJSON(t, plan), r, true)
+	rawDryResult, acErr := runPlan(makePlanJSON(t, plan), r, true)
 	if acErr != nil {
 		t.Fatalf("runPlan failed: %v", acErr)
 	}
+	result := asDryRun(t, rawDryResult)
 
-	// No commits should have been created
-	if result.Committed != 0 {
-		t.Fatalf("dry-run should have 0 committed, got %d", result.Committed)
+	// Verify DryRunResult fields
+	if !result.Valid {
+		t.Fatal("expected valid=true")
 	}
-	if result.Total != 1 {
-		t.Fatalf("expected total=1, got %d", result.Total)
+	if result.Commits != 1 {
+		t.Fatalf("expected commits=1, got %d", result.Commits)
+	}
+	if result.Files < 1 {
+		t.Fatalf("expected files>=1, got %d", result.Files)
 	}
 
 	// HEAD should not have moved
 	headAfter := strings.TrimSpace(gitHelper(t, dir, "rev-parse", "HEAD"))
 	if headBefore != headAfter {
 		t.Fatalf("dry-run should not create commits: HEAD moved from %s to %s", headBefore, headAfter)
-	}
-
-	// Status should show pending
-	if len(result.Commits) != 1 {
-		t.Fatalf("expected 1 commit result, got %d", len(result.Commits))
-	}
-	if result.Commits[0].Status != "pending" {
-		t.Errorf("expected status=pending, got %s", result.Commits[0].Status)
 	}
 }
 
