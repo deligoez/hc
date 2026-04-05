@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/deligoez/ac/internal/git"
+	"github.com/deligoez/ac/internal/output"
 )
 
 // initRepo creates a git repo in dir with an initial commit.
@@ -344,5 +345,27 @@ func TestDiffJSONOutput(t *testing.T) {
 	}
 	if !foundHandler {
 		t.Error("handler.go not found in JSON output")
+	}
+}
+
+// Bug regression: ac diff should detect not-a-git-repo with clean error
+func TestDiffNotAGitRepo(t *testing.T) {
+	dir := t.TempDir() // not a git repo
+	r := git.NewRunner(dir)
+
+	_, err := runDiff(r)
+	if err == nil {
+		t.Fatal("expected error for non-git directory")
+	}
+
+	acErr, ok := err.(*output.ACError)
+	if !ok {
+		t.Fatalf("expected ACError, got %T: %v", err, err)
+	}
+	if acErr.Code != 2 {
+		t.Errorf("expected exit code 2, got %d", acErr.Code)
+	}
+	if acErr.Message != "not a git repository" {
+		t.Errorf("unexpected error: %s", acErr.Message)
 	}
 }
