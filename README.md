@@ -8,6 +8,14 @@ AI agents produce large diffs that should be split into atomic commits. The agen
 
 ## Install
 
+**Homebrew** (macOS / Linux):
+
+```bash
+brew install deligoez/tap/hc
+```
+
+**Go**:
+
 ```bash
 go install github.com/deligoez/hc/cmd/hc@latest
 ```
@@ -115,8 +123,13 @@ All errors include `error`, `code`, and `hint` fields for agent consumption.
 ## Claude Code Skill
 
 ```bash
-mkdir -p ~/.claude/skills/hc
-cp skills/hc/SKILL.md ~/.claude/skills/hc/SKILL.md
+npx skills add -g deligoez/hc
+```
+
+Update after new releases:
+
+```bash
+npx skills update -g deligoez/hc
 ```
 
 ## License

@@ -137,9 +137,8 @@ No commits created, no git state changed. Simple retry.
 
 ```bash
 # Install the binary
-go install github.com/deligoez/hc/cmd/hc@latest
+brew install deligoez/tap/hc
 
-# Install the skill for Claude Code
-mkdir -p ~/.claude/skills/hc
-cp skills/hc/SKILL.md ~/.claude/skills/hc/SKILL.md
+# Install this skill for Claude Code
+npx skills add -g deligoez/hc
 ```
