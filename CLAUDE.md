@@ -2,56 +2,124 @@
 
 ## Project
 
-`ac` (Agentic Commits) -- a CLI tool that creates atomic git commits from a JSON plan. Written in Go.
+`hc` (Hunk Commits) -- a CLI tool that creates atomic git commits from a JSON plan. Written in Go.
+
+AI agents produce large diffs that should be split into atomic commits. `hc` solves this: the agent writes a JSON plan mapping diff hunks to commits, and `hc` handles all the mechanics -- diff parsing, line-number adjustment, patch construction, and sequential staging.
 
 ## Build & Test
 
 ```bash
-go build ./cmd/ac/       # build
+go build ./cmd/hc/       # build
 go test ./...            # run all tests
 go test ./... -count=1   # no cache
 ```
 
+## How It Works
+
+```
+Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
+        reads diff once          validates         stages & commits
+        assigns hunks            re-indexes        working tree untouched
+        done                     builds patches
+```
+
+1. Agent runs `hc diff --json` -- sees all hunks with indices
+2. Agent writes a JSON plan mapping hunks to commits
+3. Agent runs `hc run plan.json` -- all commits created in one call
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `hc diff` | Show current diff with numbered hunk indices (TTY) |
+| `hc diff --json` | Same, structured JSON (preferred for agents) |
+| `hc run <plan.json>` | Execute commit plan from file |
+| `hc run -` | Execute commit plan from stdin |
+| `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc --version` | Show version |
+
+## Plan Format
+
+```json
+{
+  "commits": [
+    {
+      "message": "feat(auth): add login",
+      "files": [
+        {"path": "auth.go", "hunks": [0, 1]},
+        {"path": "handler.go"}
+      ]
+    }
+  ],
+  "allow_unplanned": ["wip.go"]
+}
+```
+
+- `hunks` field: indices from `hc diff` output. Omit to stage entire file.
+- `allow_unplanned`: file paths/globs excluded from coverage validation.
+- Every hunk in the diff must be assigned to exactly one commit.
+
 ## Structure
 
 ```
-cmd/ac/main.go           Entry point
+cmd/hc/main.go               Entry point
 internal/
   cli/
-    root.go              Cobra root, --json/--quiet/--no-color flags
-    diff.go              ac diff command
-    run.go               ac run command (Phase 1 + Phase 2)
-    exitcodes.go         Exit 0/2/3
+    root.go                   Cobra root, --json/--quiet/--no-color flags
+    diff.go                   hc diff command
+    run.go                    hc run command (Phase 1 + Phase 2)
+    exitcodes.go              Exit 0/2/3
   diff/
-    types.go             FileDiff, Hunk, Line types
-    parse.go             Wraps go-gitdiff
-    fingerprint.go       SHA-256 content fingerprinting
-    match.go             Hunk matching by fingerprint + content-subset fallback
+    types.go                  FileDiff, Hunk, Line types
+    parse.go                  Wraps go-gitdiff
+    fingerprint.go            SHA-256 content fingerprinting
+    match.go                  Hunk matching by fingerprint + content-subset fallback
   patch/
-    build.go             Patch construction with delta accumulation
-    apply.go             git apply --cached --unidiff-zero wrapper
+    build.go                  Patch construction with delta accumulation
+    apply.go                  git apply --cached --unidiff-zero wrapper
   plan/
-    plan.go              Plan, Commit, FileEntry types
-    parse.go             JSON parser with validation
-    validate.go          Coverage validation + field validation
+    plan.go                   Plan, Commit, FileEntry types
+    parse.go                  JSON parser with validation
+    validate.go               Coverage validation + field validation
   git/
-    git.go               Git command runner
-    diff.go              Diff, IntentToAdd, IsUntracked helpers
-    commit.go            Commit, Add, ResetHead helpers
+    git.go                    Git command runner
+    diff.go                   Diff, IntentToAdd, IsUntracked helpers
+    commit.go                 Commit, Add, ResetHead helpers
   output/
-    output.go            Result types, ACError, TTY/JSON printer
-skills/ac/SKILL.md       Agent skill for Claude Code
-spec/0.1.0.md            Full specification
+    output.go                 Result types, ACError, TTY/JSON printer
+skills/hc/SKILL.md            Agent skill for Claude Code
+spec/0.1.0.md                 Full specification
 ```
 
-## Key Design Decisions
+## Architecture
 
-- **Zero-context diffs (`-U0`):** Eliminates context-mismatch failures. Each hunk is self-contained.
-- **Original indices:** The plan always references hunks from the initial diff. The tool re-indexes internally.
-- **Two-phase execution:** Phase 1 validates everything (temporary index). Phase 2 executes deterministically.
+### Two-Phase Execution
+
+- **Phase 1 (Validation):** Parse plan, capture diff (`git diff -U0 -M`), validate coverage (every hunk assigned), sequential dry-run with temporary index (`GIT_INDEX_FILE`). If anything fails: exit 2, no git state changed.
+- **Phase 2 (Execution):** For each commit: re-diff per file against current index, match hunks by content fingerprint, build adjusted patch via delta accumulation, apply, commit.
+
+### Key Algorithms
+
+- **Delta accumulation** (from Git's `add-patch.c`): When selecting non-contiguous hunks, adjusts `+` side line numbers for skipped hunks.
 - **Content fingerprinting:** SHA-256 of ordered delete/add lines. Matches hunks across commits after line-number shifts.
-- **Content-subset fallback:** When git merges adjacent hunks, the tool uses subsequence matching to split them.
-- **Pre-staged changes are a hard error:** `ac` requires a clean staging area.
+- **Content-subset fallback:** When git merges adjacent hunks (common after earlier commits shift line counts), uses subsequence matching to identify which current hunk contains the original hunk's content. `BuildCompositePatch` extracts sub-patches from merged hunks.
+
+### Error Handling
+
+- Exit code 2 for all validation errors (plan issues, no git state changed)
+- Exit code 3 for execution errors (unexpected git failure during Phase 2)
+- Every error includes `error`, `code`, `hint` fields in JSON
+- Error messages must match spec Section 6.2 exactly
+
+### Edge Cases Handled
+
+- New (untracked) files via `git add -N` before diff capture
+- Deleted files via `git add`
+- Renamed files via `git diff -M` rename detection
+- Binary files (full-file only, hunk-select = validation error)
+- No-trailing-newline files (`\ No newline at end of file` marker)
+- Adjacent hunk merging by git (automatic sub-patch extraction via `BuildCompositePatch`)
+- Pre-staged changes = hard error (requires clean staging area)
 
 ## Conventions
 
@@ -60,3 +128,14 @@ spec/0.1.0.md            Full specification
 - `--no-ext-diff` flag on all git diff calls (bypass external diff tools)
 - `-M` flag on diff calls for rename detection
 - Tests use real git repos via `t.TempDir()`
+- All validation errors revert `git add -N` operations before returning
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `github.com/spf13/cobra` | CLI framework |
+| `github.com/bluekeyes/go-gitdiff` | Diff parsing |
+| `github.com/mattn/go-isatty` | TTY detection |
+| `github.com/fatih/color` | Colored TTY output |
+| `git` (external) | All git operations via `os/exec` |

@@ -1,6 +1,6 @@
 version: 2
 
-project_name: ac
+project_name: hc
 
 before:
   hooks:
@@ -8,8 +8,8 @@ before:
     - go test ./...
 
 builds:
-  - main: ./cmd/ac
-    binary: ac
+  - main: ./cmd/hc
+    binary: hc
     env:
       - CGO_ENABLED=0
     goos:
@@ -21,7 +21,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/deligoez/ac/internal/cli.version={{.Version}}
+      - -X github.com/deligoez/hc/internal/cli.version={{.Version}}
 
 archives:
   - name_template: >-

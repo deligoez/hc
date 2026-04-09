@@ -1,5 +1,5 @@
 # Build artifacts
-/ac
+/hc
 *.exe
 
 # Review findings (generated during spec review)

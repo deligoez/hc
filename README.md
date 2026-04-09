@@ -1,20 +1,24 @@
-# ac -- Agentic Commits
+# hc -- Hunk Commits
 
 Hunk-based atomic commits for AI agents. One JSON plan, N commits.
 
-AI agents produce large diffs that should be split into atomic commits. The agent knows *which hunks belong together* but has no reliable way to execute that plan. `ac` solves this: the agent writes a JSON plan mapping hunks to commits, and `ac` handles all the mechanics -- diff parsing, line-number adjustment, patch construction, and sequential staging.
+AI agents produce large diffs that should be split into atomic commits. The agent knows *which hunks belong together* but has no reliable way to execute that plan -- `git add -p` is interactive, manual `git apply` requires line-number arithmetic, and full-file `git add` can't split a file across commits.
+
+`hc` solves this: the agent writes a JSON plan mapping hunks to commits, and `hc` handles everything else.
 
 ## Install
 
 ```bash
-go install github.com/deligoez/ac/cmd/ac@latest
+go install github.com/deligoez/hc/cmd/hc@latest
 ```
+
+Or download a binary from [releases](https://github.com/deligoez/hc/releases).
 
 ## Quick Start
 
 ```bash
 # 1. See what changed
-ac diff --json
+hc diff --json
 
 # 2. Write a plan
 cat > plan.json << 'EOF'
@@ -36,21 +40,21 @@ cat > plan.json << 'EOF'
 EOF
 
 # 3. Execute
-ac run plan.json
+hc run plan.json
 ```
 
 ## How It Works
 
 ```
-Agent  --[writes]--> plan.json --[stdin/file]--> ac  --[git calls]--> repository
+Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
          Looks at diff once.      Validates plan.       Stages & commits.
          Assigns hunks.           Re-indexes hunks.     Working tree untouched.
          Done.                    Builds patches.
 ```
 
-1. Agent runs `ac diff --json` to see all hunks with indices
+1. Agent runs `hc diff --json` to see all hunks with indices
 2. Agent writes a commit plan (JSON) mapping hunks to commits
-3. Agent runs `ac run plan.json` -- all commits created in one call
+3. Agent runs `hc run plan.json` -- all commits created in one call
 
 The agent never touches `git add`, `git apply`, or `git commit` directly.
 
@@ -58,12 +62,12 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 
 | Command | Description |
 |---------|-------------|
-| `ac diff` | Show current diff with numbered hunk indices |
-| `ac diff --json` | Same, as structured JSON |
-| `ac run <plan>` | Execute commit plan from file |
-| `ac run -` | Execute commit plan from stdin |
-| `ac run --dry-run <plan>` | Validate plan without committing |
-| `ac version` | Show version |
+| `hc diff` | Show current diff with numbered hunk indices |
+| `hc diff --json` | Same, as structured JSON |
+| `hc run <plan>` | Execute commit plan from file |
+| `hc run -` | Execute commit plan from stdin |
+| `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc --version` | Show version |
 
 ## Plan Format
 
@@ -82,7 +86,7 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 }
 ```
 
-- **`hunks`**: Indices from `ac diff` output. Omit to stage the entire file.
+- **`hunks`**: Indices from `hc diff` output. Omit to stage the entire file.
 - **`allow_unplanned`**: Files/globs excluded from coverage validation.
 - Every hunk in the diff must be assigned to exactly one commit (complete coverage).
 
@@ -110,11 +114,9 @@ All errors include `error`, `code`, and `hint` fields for agent consumption.
 
 ## Claude Code Skill
 
-To use `ac` as a Claude Code skill:
-
 ```bash
-mkdir -p ~/.claude/skills/ac
-cp skills/ac/SKILL.md ~/.claude/skills/ac/SKILL.md
+mkdir -p ~/.claude/skills/hc
+cp skills/hc/SKILL.md ~/.claude/skills/hc/SKILL.md
 ```
 
 ## License
