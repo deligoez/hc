@@ -40,6 +40,22 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - repository:
+      owner: deligoez
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: goreleaser
+      email: goreleaser@users.noreply.github.com
+    homepage: https://github.com/deligoez/hc
+    description: "Hunk-based atomic git commits for AI agents"
+    license: "MIT"
+    install: |
+      bin.install "hc"
+    test: |
+      assert_match "hc version", shell_output("#{bin}/hc --version")
+
 changelog:
   sort: asc
   filters:
