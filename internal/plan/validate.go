@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // ValidateFields validates plan fields after parsing.

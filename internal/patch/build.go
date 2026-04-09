@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/deligoez/ac/internal/diff"
+	"github.com/deligoez/hc/internal/diff"
 )
 
 // BuildPatch produces a git-compatible unified diff patch for the selected hunks

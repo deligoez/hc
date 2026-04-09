@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deligoez/ac/internal/diff"
+	"github.com/deligoez/hc/internal/diff"
 )
 
 // fourHunks returns the worked example from spec Section 3.7:

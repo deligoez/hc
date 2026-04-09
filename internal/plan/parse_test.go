@@ -3,7 +3,7 @@ package plan
 import (
 	"testing"
 
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // Test 35: Valid plan parsed correctly.

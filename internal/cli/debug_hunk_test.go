@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/git"
-	"github.com/deligoez/ac/internal/patch"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/patch"
 )
 
 func TestDebugHunkMatching(t *testing.T) {

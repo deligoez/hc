@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // --- Field Validation Tests ---

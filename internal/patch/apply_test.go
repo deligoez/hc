@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/git"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/git"
 )
 
 // initRepo creates a temp git repo, commits an initial file, and returns the runner and cleanup.

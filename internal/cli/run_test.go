@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deligoez/ac/internal/git"
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // asResult type-asserts the runPlan result to *output.Result (for non-dry-run).

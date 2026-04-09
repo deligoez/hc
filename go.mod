@@ -1,4 +1,4 @@
-module github.com/deligoez/ac
+module github.com/deligoez/hc
 
 go 1.25.6
 

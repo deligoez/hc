@@ -7,7 +7,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/output"
 )
 
 var version = "dev"
@@ -28,9 +28,9 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root := &cobra.Command{
-		Use:   "ac",
-		Short: "ac -- agentic commits: hunk-based atomic commits for AI agents",
-		Long:  "ac splits large diffs into precise, atomic commits by selecting specific diff hunks per commit.",
+		Use:   "hc",
+		Short: "hc -- hunk commits: hunk-based atomic commits for AI agents",
+		Long:  "hc splits large diffs into precise, atomic commits by selecting specific diff hunks per commit.",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			printer = output.NewPrinter()
 			printer.ForceJSON = flagJSON
@@ -45,7 +45,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root.Version = version
-	root.SetVersionTemplate("ac version {{.Version}}\n")
+	root.SetVersionTemplate("hc version {{.Version}}\n")
 
 	root.PersistentFlags().BoolVar(&flagJSON, "json", false, "Force JSON output")
 	root.PersistentFlags().BoolVar(&flagQuiet, "quiet", false, "Suppress info messages")

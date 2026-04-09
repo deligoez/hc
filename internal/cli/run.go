@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/git"
-	"github.com/deligoez/ac/internal/output"
-	"github.com/deligoez/ac/internal/patch"
-	"github.com/deligoez/ac/internal/plan"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/output"
+	"github.com/deligoez/hc/internal/patch"
+	"github.com/deligoez/hc/internal/plan"
 )
 
 func newRunCmd() *cobra.Command {

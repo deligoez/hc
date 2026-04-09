@@ -1,7 +1,7 @@
 package patch
 
 import (
-	"github.com/deligoez/ac/internal/git"
+	"github.com/deligoez/hc/internal/git"
 )
 
 // Apply applies a patch to the git index using git apply --cached --unidiff-zero.

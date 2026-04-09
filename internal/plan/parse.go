@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // Parse decodes JSON bytes into a Plan and validates its structure.

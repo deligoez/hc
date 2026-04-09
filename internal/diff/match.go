@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // MatchHunks maps original hunk indices to current hunk indices by content fingerprint.

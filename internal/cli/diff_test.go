@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/deligoez/ac/internal/git"
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // initRepo creates a git repo in dir with an initial commit.

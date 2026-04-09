@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/deligoez/ac/internal/diff"
-	"github.com/deligoez/ac/internal/git"
-	"github.com/deligoez/ac/internal/output"
+	"github.com/deligoez/hc/internal/diff"
+	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/output"
 )
 
 // diffFileJSON is the JSON representation of a file in the diff output.
