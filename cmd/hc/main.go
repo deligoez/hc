@@ -1,6 +1,6 @@
 package main
 
-import "github.com/deligoez/ac/internal/cli"
+import "github.com/deligoez/hc/internal/cli"
 
 func main() {
 	cli.Execute()

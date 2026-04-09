@@ -1,9 +1,9 @@
 ---
-name: ac
+name: hc
 description: Hunk-based atomic git commits for AI agents. Splits large diffs into precise, atomic commits by selecting specific diff hunks per commit.
 ---
 
-# ac -- Agentic Commits Skill
+# hc -- Hunk Commits Skill
 
 Hunk-based atomic commits for AI agents. One JSON plan, N commits. Agent assigns hunks, tool handles everything else.
 
@@ -18,21 +18,21 @@ This skill activates when:
 
 ```
 # Step 1: See what changed (indexed hunks)
-ac diff --json
+hc diff --json
 
 # Step 2: Write a commit plan
 # Map hunks to commits based on logical grouping.
-# Use the ORIGINAL diff's hunk indices -- ac handles re-indexing.
+# Use the ORIGINAL diff's hunk indices -- hc handles re-indexing.
 # IMPORTANT: Every hunk must be assigned to exactly one commit.
 
 # Step 3: Execute
-echo '<plan-json>' | ac run -
+echo '<plan-json>' | hc run -
 
 # Or with a file:
-ac run plan.json
+hc run plan.json
 
 # Optional: validate first
-echo '<plan-json>' | ac run --dry-run -
+echo '<plan-json>' | hc run --dry-run -
 ```
 
 ## Plan Format
@@ -58,14 +58,14 @@ echo '<plan-json>' | ac run --dry-run -
 | `commits[].message` | string | Non-empty commit message |
 | `commits[].files` | array | Files in this commit (at least one) |
 | `commits[].files[].path` | string | Relative path from repo root |
-| `commits[].files[].hunks` | int[] | Hunk indices from `ac diff`. Omit for full-file staging. |
+| `commits[].files[].hunks` | int[] | Hunk indices from `hc diff`. Omit for full-file staging. |
 | `allow_unplanned` | string[] | Paths/globs excluded from coverage validation |
 
 ## Plan Writing Rules
 
-1. **Run `ac diff --json` once.** Use the indexed output to see all files and hunk indices.
+1. **Run `hc diff --json` once.** Use the indexed output to see all files and hunk indices.
 2. **Assign EVERY hunk to exactly one commit.** Complete coverage is required. No hunk can be left unassigned.
-3. **Use original indices.** Always reference hunks by their position in the `ac diff` output, even for later commits. ac handles re-indexing internally.
+3. **Use original indices.** Always reference hunks by their position in the `hc diff` output, even for later commits. hc handles re-indexing internally.
 4. **Full-file for simple cases.** If an entire file belongs in one commit, omit `hunks`.
 5. **Group by logical change.** Same type + same specific problem + direct dependency = same commit.
 6. **Conventional commit messages.** Use the project's commit convention.
@@ -118,7 +118,7 @@ echo '<plan-json>' | ac run --dry-run -
 Errors only happen during validation (before any commits):
 1. Read the `error` and `hint` fields from JSON output
 2. Fix the plan (adjust hunk indices, add missing files, etc.)
-3. Retry: `echo '<fixed-plan>' | ac run -`
+3. Retry: `echo '<fixed-plan>' | hc run -`
 
 No commits created, no git state changed. Simple retry.
 
@@ -126,20 +126,20 @@ No commits created, no git state changed. Simple retry.
 
 | Command | Purpose |
 |---------|---------|
-| `ac diff` | Show all files and hunks with indices |
-| `ac diff --json` | Same, as structured JSON (preferred) |
-| `echo '<json>' \| ac run -` | Execute plan from stdin |
-| `ac run plan.json` | Execute plan from file |
-| `ac run --dry-run -` | Validate plan without committing |
-| `ac version` | Show version |
+| `hc diff` | Show all files and hunks with indices |
+| `hc diff --json` | Same, as structured JSON (preferred) |
+| `echo '<json>' \| hc run -` | Execute plan from stdin |
+| `hc run plan.json` | Execute plan from file |
+| `hc run --dry-run -` | Validate plan without committing |
+| `hc --version` | Show version |
 
 ## Installation
 
 ```bash
 # Install the binary
-go install github.com/deligoez/ac/cmd/ac@latest
+go install github.com/deligoez/hc/cmd/hc@latest
 
 # Install the skill for Claude Code
-mkdir -p ~/.claude/skills/ac
-cp skills/ac/SKILL.md ~/.claude/skills/ac/SKILL.md
+mkdir -p ~/.claude/skills/hc
+cp skills/hc/SKILL.md ~/.claude/skills/hc/SKILL.md
 ```
