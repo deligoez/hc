@@ -41,7 +41,8 @@ checksum:
   name_template: checksums.txt
 
 brews:
-  - repository:
+  - name: deligoez-hc
+    repository:
       owner: deligoez
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
