@@ -501,6 +501,15 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 		)
 	}
 
+	// Preserve the original index's mtime on the copy. Git's racy-git
+	// protection content-checks entries whose stat mtime is not older than
+	// the index file itself; a fresh copy timestamp defeats that check, and
+	// a file rewritten within the stat granularity of its index entry (same
+	// size, same mtime) is then silently reported as unchanged.
+	if fi, err := os.Stat(origIndex); err == nil {
+		_ = os.Chtimes(tmpPath, fi.ModTime(), fi.ModTime())
+	}
+
 	// Create a runner that uses the temp index.
 	tempRunner := &git.Runner{
 		Dir: runner.Dir,
