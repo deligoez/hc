@@ -109,7 +109,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		return nil, output.NewValidationError(err.Error(), "")
 	}
 
-	// --- Step 4: Intent-to-add for untracked files that have hunks ---
+	// --- Step 4: Intent-to-add for untracked files referenced in the plan ---
 	var intentAdded []string
 	revertIntent := func() {
 		for _, path := range intentAdded {
@@ -117,33 +117,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		}
 	}
 
-	// Collect all unique file paths referenced in the plan that have hunks.
-	intentPaths := collectHunkFilePaths(p)
-	for _, path := range intentPaths {
-		untracked, err := runner.IsUntracked(path)
-		if err != nil {
-			revertIntent()
-			return nil, output.NewExecutionError(
-				fmt.Sprintf("cannot check untracked status for %s: %v", path, err),
-				"Ensure the file exists and git is working correctly.",
-			)
-		}
-		if untracked {
-			if err := runner.IntentToAdd(path); err != nil {
-				revertIntent()
-				return nil, output.NewExecutionError(
-					fmt.Sprintf("git add -N failed for %s: %v", path, err),
-					"",
-				)
-			}
-			intentAdded = append(intentAdded, path)
-		}
-	}
-
-	// Also intent-to-add full-file entries that are untracked, so they appear
-	// in the diff for coverage validation.
-	fullFilePaths := collectFullFilePaths(p)
-	for _, path := range fullFilePaths {
+	for _, path := range collectPlanFilePaths(p) {
 		untracked, err := runner.IsUntracked(path)
 		if err != nil {
 			revertIntent()
@@ -574,28 +548,16 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// collectHunkFilePaths returns unique file paths that use hunk-select mode.
-func collectHunkFilePaths(p *plan.Plan) []string {
+// collectPlanFilePaths returns the unique file paths referenced by the plan,
+// in first-seen order. Both hunk-select and full-file entries are included:
+// untracked files in either mode need intent-to-add so they appear in the
+// diff for coverage validation.
+func collectPlanFilePaths(p *plan.Plan) []string {
 	seen := make(map[string]bool)
 	var paths []string
 	for _, c := range p.Commits {
 		for _, f := range c.Files {
-			if !f.IsFullFile() && !seen[f.Path] {
-				seen[f.Path] = true
-				paths = append(paths, f.Path)
-			}
-		}
-	}
-	return paths
-}
-
-// collectFullFilePaths returns unique file paths that use full-file mode.
-func collectFullFilePaths(p *plan.Plan) []string {
-	seen := make(map[string]bool)
-	var paths []string
-	for _, c := range p.Commits {
-		for _, f := range c.Files {
-			if f.IsFullFile() && !seen[f.Path] {
+			if !seen[f.Path] {
 				seen[f.Path] = true
 				paths = append(paths, f.Path)
 			}
