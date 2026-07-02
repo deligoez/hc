@@ -247,6 +247,112 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	return result, nil
 }
 
+// stageError describes a failure while preparing a hunk-select patch.
+type stageError struct {
+	msg  string
+	hint string
+}
+
+// buildHunkPatch re-diffs a file against the runner's current index, matches
+// the planned original hunks to the current hunks (by fingerprint, with
+// content-subset fallback for merged hunks), and builds an applyable patch.
+// It is shared by the temp-index validation pass and real execution: the only
+// difference between the two is which index the runner points at.
+func buildHunkPatch(runner *git.Runner, f plan.FileEntry, diffMap map[string]*diff.FileDiff) ([]byte, *stageError) {
+	// Re-diff against the runner's index.
+	reDiffOutput, err := runner.DiffFile(f.Path, "-U0", "--no-ext-diff")
+	if err != nil {
+		return nil, &stageError{msg: fmt.Sprintf("cannot diff %s: %v", f.Path, err)}
+	}
+
+	currentFiles, err := diff.Parse(reDiffOutput)
+	if err != nil {
+		return nil, &stageError{msg: fmt.Sprintf("cannot parse diff for %s: %v", f.Path, err)}
+	}
+
+	if len(currentFiles) == 0 {
+		return nil, &stageError{
+			msg:  fmt.Sprintf("no diff for %s against current index", f.Path),
+			hint: "The file may have already been fully staged by a previous commit.",
+		}
+	}
+
+	currentFile := currentFiles[0]
+
+	// Fingerprint the current hunks.
+	for j := range currentFile.Hunks {
+		currentFile.Hunks[j].Fingerprint = diff.Fingerprint(currentFile.Hunks[j])
+	}
+
+	// Get the original file diff for fingerprint matching.
+	origFile, ok := diffMap[f.Path]
+	if !ok {
+		return nil, &stageError{msg: fmt.Sprintf("%s not found in original diff", f.Path)}
+	}
+
+	// Build subset of original hunks that this file entry references.
+	origSubset := make([]diff.Hunk, 0, len(f.Hunks))
+	for _, hunkIdx := range f.Hunks {
+		if hunkIdx >= len(origFile.Hunks) {
+			return nil, &stageError{msg: fmt.Sprintf("hunk %d out of range for %s", hunkIdx, f.Path)}
+		}
+		origSubset = append(origSubset, origFile.Hunks[hunkIdx])
+	}
+
+	// Match original hunks to current hunks.
+	matchMap, err := diff.MatchHunks(origSubset, currentFile.Hunks)
+	if err != nil {
+		return nil, &stageError{
+			msg:  fmt.Sprintf("hunk matching failed for %s: %v", f.Path, err),
+			hint: "A previous commit may have consumed or altered this hunk.",
+		}
+	}
+
+	// Group original hunks by their matched current hunk index.
+	currentToOrigs := make(map[int][]diff.Hunk)
+	for i, oh := range origSubset {
+		currentToOrigs[matchMap[i]] = append(currentToOrigs[matchMap[i]], oh)
+	}
+
+	// Collect unique matched current hunk indices (preserve order).
+	seen := make(map[int]bool)
+	selected := make([]int, 0, len(f.Hunks))
+	for i := 0; i < len(origSubset); i++ {
+		idx := matchMap[i]
+		if !seen[idx] {
+			selected = append(selected, idx)
+			seen[idx] = true
+		}
+	}
+
+	// Check if any selected current hunk is a merged hunk (matched via
+	// content-subset rather than exact fingerprint). Merged hunks contain
+	// lines from multiple original hunks; we must extract only our lines.
+	hasMerged := false
+	for _, ci := range selected {
+		if patch.IsMergedHunk(currentFile.Hunks[ci], currentToOrigs[ci]) {
+			hasMerged = true
+			break
+		}
+	}
+
+	var patchBytes []byte
+	if !hasMerged {
+		// Normal case: all matches are exact. Use standard BuildPatch.
+		patchBytes, err = patch.BuildPatch(currentFile, selected, currentFile.Hunks)
+	} else {
+		// Merged case: at least one current hunk is merged. Build a
+		// composite patch with sub-patches for merged hunks and full
+		// hunks for exact matches.
+		patchBytes, err = patch.BuildCompositePatch(currentFile, selected, currentFile.Hunks, currentToOrigs)
+	}
+	if err != nil {
+		return nil, &stageError{msg: fmt.Sprintf("cannot build patch for %s: %v", f.Path, err)}
+	}
+
+	return patchBytes, nil
+}
+
 // executePlan iterates over each commit in the plan, stages the appropriate
 // hunks/files, and creates real commits. On failure it returns a partial result.
 func executePlan(p *plan.Plan, origFiles []diff.FileDiff, runner *git.Runner, addedNFiles []string) (*output.Result, *output.ACError) {
@@ -299,7 +405,7 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 				cr.Status = "failed"
 				cr.Error = fmt.Sprintf("cannot stage %s: %v", f.Path, err)
 				cr.Hint = "Check that the file exists and has changes."
-				// Reset staging on apply failure.
+				// Reset staging on stage failure.
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
 				return cr
@@ -308,117 +414,11 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 			fr.Strategy = "hunks"
 			fr.Hunks = f.Hunks
 
-			// Re-diff against current index.
-			reDiffOutput, err := runner.DiffFile(f.Path, "-U0", "--no-ext-diff")
-			if err != nil {
+			patchBytes, se := buildHunkPatch(runner, f, diffMap)
+			if se != nil {
 				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("cannot diff %s: %v", f.Path, err)
-				_ = runner.ResetHead()
-				cr.Files = append(cr.Files, fr)
-				return cr
-			}
-
-			currentFiles, err := diff.Parse(reDiffOutput)
-			if err != nil {
-				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("cannot parse diff for %s: %v", f.Path, err)
-				_ = runner.ResetHead()
-				cr.Files = append(cr.Files, fr)
-				return cr
-			}
-
-			if len(currentFiles) == 0 {
-				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("no diff for %s against current index", f.Path)
-				cr.Hint = "The file may have already been fully staged by a previous commit."
-				_ = runner.ResetHead()
-				cr.Files = append(cr.Files, fr)
-				return cr
-			}
-
-			currentFileDiff := currentFiles[0]
-
-			// Fingerprint current hunks.
-			for j := range currentFileDiff.Hunks {
-				currentFileDiff.Hunks[j].Fingerprint = diff.Fingerprint(currentFileDiff.Hunks[j])
-			}
-
-			// Get the original file diff for fingerprint matching.
-			origFile, ok := diffMap[f.Path]
-			if !ok {
-				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("%s not found in original diff", f.Path)
-				_ = runner.ResetHead()
-				cr.Files = append(cr.Files, fr)
-				return cr
-			}
-
-			// Build subset of original hunks that this file entry references.
-			origSubset := make([]diff.Hunk, 0, len(f.Hunks))
-			for _, hunkIdx := range f.Hunks {
-				if hunkIdx >= len(origFile.Hunks) {
-					cr.Status = "failed"
-					cr.Error = fmt.Sprintf("hunk %d out of range for %s", hunkIdx, f.Path)
-					_ = runner.ResetHead()
-					cr.Files = append(cr.Files, fr)
-					return cr
-				}
-				origSubset = append(origSubset, origFile.Hunks[hunkIdx])
-			}
-
-			// Match original hunks to current hunks.
-			matchMap, err := diff.MatchHunks(origSubset, currentFileDiff.Hunks)
-			if err != nil {
-				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("hunk matching failed for %s: %v", f.Path, err)
-				cr.Hint = "A previous commit may have consumed or altered this hunk."
-				_ = runner.ResetHead()
-				cr.Files = append(cr.Files, fr)
-				return cr
-			}
-
-			// Group original hunks by their matched current hunk index.
-			currentToOrigs := make(map[int][]diff.Hunk)
-			for i, oh := range origSubset {
-				ci := matchMap[i]
-				currentToOrigs[ci] = append(currentToOrigs[ci], oh)
-			}
-
-			// Collect unique matched current hunk indices (preserve order).
-			dedupSeen := make(map[int]bool)
-			currentSelectedIndices := make([]int, 0, len(f.Hunks))
-			for i := 0; i < len(origSubset); i++ {
-				idx := matchMap[i]
-				if !dedupSeen[idx] {
-					currentSelectedIndices = append(currentSelectedIndices, idx)
-					dedupSeen[idx] = true
-				}
-			}
-
-			// Check if any selected current hunk is a merged hunk (matched via
-			// content-subset rather than exact fingerprint). Merged hunks contain
-			// lines from multiple original hunks; we must extract only our lines.
-			hasMerged := false
-			for _, ci := range currentSelectedIndices {
-				if patch.IsMergedHunk(currentFileDiff.Hunks[ci], currentToOrigs[ci]) {
-					hasMerged = true
-					break
-				}
-			}
-
-			var patchBytes []byte
-			if !hasMerged {
-				// Normal case: all matches are exact. Use standard BuildPatch.
-				patchBytes, err = patch.BuildPatch(currentFileDiff, currentSelectedIndices, currentFileDiff.Hunks)
-			} else {
-				// Merged case: at least one current hunk is merged. Build a
-				// composite patch with sub-patches for merged hunks and full
-				// hunks for exact matches.
-				patchBytes, err = patch.BuildCompositePatch(currentFileDiff, currentSelectedIndices, currentFileDiff.Hunks, currentToOrigs)
-			}
-			if err != nil {
-				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("cannot build patch for %s: %v", f.Path, err)
+				cr.Error = se.msg
+				cr.Hint = se.hint
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
 				return cr
@@ -528,116 +528,24 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 						"Check that the file exists and has changes.",
 					)
 				}
-			} else {
-				// Hunk-select: get current diff against the temp index,
-				// match hunks by fingerprint, build and apply a patch.
-				currentRaw, err := tempRunner.DiffFile(f.Path, "-U0", "--no-ext-diff")
-				if err != nil {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: cannot diff %s against temp index: %v", ci, f.Path, err),
-						"",
-					)
-				}
+				continue
+			}
 
-				currentFiles, err := diff.Parse(currentRaw)
-				if err != nil {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: cannot parse diff for %s: %v", ci, f.Path, err),
-						"",
-					)
-				}
+			// Hunk-select: same pipeline as execution, but against the temp index.
+			patchData, se := buildHunkPatch(tempRunner, f, diffMap)
+			if se != nil {
+				return output.NewExecutionError(
+					fmt.Sprintf("validation failed at commit %d: %s", ci, se.msg),
+					se.hint,
+				)
+			}
 
-				if len(currentFiles) == 0 {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: no diff for %s against temp index", ci, f.Path),
-						"The file may have already been fully staged by a previous commit.",
-					)
-				}
-
-				currentFile := currentFiles[0]
-
-				// Fingerprint the current hunks.
-				for j := range currentFile.Hunks {
-					currentFile.Hunks[j].Fingerprint = diff.Fingerprint(currentFile.Hunks[j])
-				}
-
-				// Get the original file diff for matching.
-				origFile, ok := diffMap[f.Path]
-				if !ok {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: %s not found in original diff", ci, f.Path),
-						"",
-					)
-				}
-
-				// Build subset of original hunks that this file entry references.
-				origSubset := make([]diff.Hunk, 0, len(f.Hunks))
-				for _, hunkIdx := range f.Hunks {
-					if hunkIdx >= len(origFile.Hunks) {
-						return output.NewExecutionError(
-							fmt.Sprintf("validation failed at commit %d: hunk %d out of range for %s", ci, hunkIdx, f.Path),
-							"",
-						)
-					}
-					origSubset = append(origSubset, origFile.Hunks[hunkIdx])
-				}
-
-				// Match original hunks to current hunks using MatchHunks.
-				matchMap, err := diff.MatchHunks(origSubset, currentFile.Hunks)
-				if err != nil {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: hunk matching failed for %s: %v", ci, f.Path, err),
-						"A previous commit may have consumed or altered this hunk.",
-					)
-				}
-
-				// Group original hunks by their matched current hunk index.
-				currentToOrigs := make(map[int][]diff.Hunk)
-				for i, oh := range origSubset {
-					ci := matchMap[i]
-					currentToOrigs[ci] = append(currentToOrigs[ci], oh)
-				}
-
-				// Collect unique matched current hunk indices (preserve order).
-				seen := make(map[int]bool)
-				selectedCurrentIndices := make([]int, 0, len(f.Hunks))
-				for i := 0; i < len(origSubset); i++ {
-					idx := matchMap[i]
-					if !seen[idx] {
-						selectedCurrentIndices = append(selectedCurrentIndices, idx)
-						seen[idx] = true
-					}
-				}
-
-				// Check if any selected current hunk is merged.
-				hasMerged := false
-				for _, ci := range selectedCurrentIndices {
-					if patch.IsMergedHunk(currentFile.Hunks[ci], currentToOrigs[ci]) {
-						hasMerged = true
-						break
-					}
-				}
-
-				var patchData []byte
-				if !hasMerged {
-					patchData, err = patch.BuildPatch(currentFile, selectedCurrentIndices, currentFile.Hunks)
-				} else {
-					patchData, err = patch.BuildCompositePatch(currentFile, selectedCurrentIndices, currentFile.Hunks, currentToOrigs)
-				}
-				if err != nil {
-					return output.NewExecutionError(
-						fmt.Sprintf("validation failed at commit %d: cannot build patch for %s: %v", ci, f.Path, err),
-						"",
-					)
-				}
-
-				// Apply the patch to the temp index.
-				if err := patch.Apply(tempRunner, patchData); err != nil {
-					return output.NewExecutionError(
-						fmt.Sprintf("patch validation failed for %s hunks %v: %v", f.Path, f.Hunks, err),
-						"This may indicate a diff parsing issue. Run 'ac diff' to inspect the current state.",
-					)
-				}
+			// Apply the patch to the temp index.
+			if err := patch.Apply(tempRunner, patchData); err != nil {
+				return output.NewExecutionError(
+					fmt.Sprintf("patch validation failed for %s hunks %v: %v", f.Path, f.Hunks, err),
+					"This may indicate a diff parsing issue. Run 'hc diff' to inspect the current state.",
+				)
 			}
 		}
 	}
@@ -733,4 +641,3 @@ func buildDryRunResult(p *plan.Plan, parsedFiles []diff.FileDiff) *output.DryRun
 		Issues:        []output.DryRunIssue{},
 	}
 }
-
