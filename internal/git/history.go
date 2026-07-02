@@ -113,10 +113,12 @@ func (r *Runner) WriteTree() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// CommitTree creates a commit object for tree with the given parent and
+// CommitTree creates a commit object for tree with the given parents and
 // message, preserving the original author identity/date. It returns the new
 // commit SHA. The committer stays the current user (rebase semantics).
-func (r *Runner) CommitTree(tree, parent, message string, author *CommitInfo) (string, error) {
+// Multiple parents re-create merge commits (their extra parents are kept
+// verbatim when a merge is re-parented across a rewrite).
+func (r *Runner) CommitTree(tree string, parents []string, message string, author *CommitInfo) (string, error) {
 	saved := r.Env
 	defer func() { r.Env = saved }()
 	r.Env = append(append([]string{}, saved...),
@@ -124,11 +126,30 @@ func (r *Runner) CommitTree(tree, parent, message string, author *CommitInfo) (s
 		"GIT_AUTHOR_EMAIL="+author.AuthorMail,
 		"GIT_AUTHOR_DATE="+author.AuthorDate,
 	)
-	out, err := r.RunWithStdin([]byte(message), "commit-tree", tree, "-p", parent, "-F", "-")
+	args := []string{"commit-tree", tree}
+	for _, p := range parents {
+		args = append(args, "-p", p)
+	}
+	args = append(args, "-F", "-")
+	out, err := r.RunWithStdin([]byte(message), args...)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// IsAncestor reports whether ancestor is reachable from descendant.
+func (r *Runner) IsAncestor(ancestor, descendant string) (bool, error) {
+	_, err := r.Run("merge-base", "--is-ancestor", ancestor, descendant)
+	if err == nil {
+		return true, nil
+	}
+	// merge-base --is-ancestor exits 1 for "no"; other failures bubble up.
+	if strings.Contains(err.Error(), "merge-base") && strings.TrimSpace(err.Error()) != "" &&
+		!strings.Contains(err.Error(), "fatal") {
+		return false, nil
+	}
+	return false, err
 }
 
 // UpdateRef points ref at sha, recording oldSHA as the expected previous
