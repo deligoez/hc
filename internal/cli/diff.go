@@ -13,17 +13,17 @@ import (
 
 // diffFileJSON is the JSON representation of a file in the diff output.
 type diffFileJSON struct {
-	Path        string         `json:"path"`
-	Hunks       []diffHunkJSON `json:"hunks"`
-	IsNew       bool           `json:"is_new,omitempty"`
-	IsDeleted   bool           `json:"is_deleted,omitempty"`
-	IsRenamed   bool           `json:"is_renamed,omitempty"`
-	OldPath     string         `json:"old_path,omitempty"`
-	IsBinary    bool           `json:"is_binary,omitempty"`
-	IsUntracked bool           `json:"is_untracked,omitempty"`
+	Path      string         `json:"path"`
+	Hunks     []diffHunkJSON `json:"hunks"`
+	IsNew     bool           `json:"is_new,omitempty"`
+	IsDeleted bool           `json:"is_deleted,omitempty"`
+	IsRenamed bool           `json:"is_renamed,omitempty"`
+	OldPath   string         `json:"old_path,omitempty"`
+	IsBinary  bool           `json:"is_binary,omitempty"`
 	// IsIntentToAdd marks files that appear in the diff only because of a
 	// git add -N index entry. hc run skips them from coverage validation
-	// unless the plan references them.
+	// unless the plan references them. Plain untracked files are listed in
+	// the top-level untracked array instead.
 	IsIntentToAdd bool `json:"is_intent_to_add,omitempty"`
 }
 
@@ -48,20 +48,21 @@ type diffSummaryJSON struct {
 
 // diffOutputJSON is the top-level JSON output for the diff command.
 type diffOutputJSON struct {
-	Files    []diffFileJSON  `json:"files"`
-	Summary  diffSummaryJSON `json:"summary"`
-	Warnings []string        `json:"warnings,omitempty"`
+	Files []diffFileJSON `json:"files"`
+	// Untracked lists plain untracked paths compactly. They carry no hunks,
+	// never enter coverage validation, and are committed only when a plan
+	// references their path -- so they are kept out of files to avoid
+	// reading as "changes that must be planned".
+	Untracked []string        `json:"untracked,omitempty"`
+	Summary   diffSummaryJSON `json:"summary"`
+	Warnings  []string        `json:"warnings,omitempty"`
 }
 
 // diffResult is the internal result of computing the diff.
 type diffResult struct {
-	Files    []diffFileResult
-	Warnings []string
-}
-
-type diffFileResult struct {
-	diff.FileDiff
-	IsUntracked bool
+	Files     []diff.FileDiff
+	Untracked []string
+	Warnings  []string
 }
 
 func newDiffCmd() *cobra.Command {
@@ -134,12 +135,10 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 	}
 
 	// Build result from parsed files
-	result := &diffResult{}
-	for _, f := range files {
-		result.Files = append(result.Files, diffFileResult{FileDiff: f})
-	}
+	result := &diffResult{Files: files}
 
-	// List untracked files
+	// List untracked files (compact: paths only; they carry no hunks and
+	// never enter coverage validation)
 	untrackedOut, err := runner.Run("ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		result.Warnings = append(result.Warnings,
@@ -149,17 +148,11 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 			if line == "" {
 				continue
 			}
-			result.Files = append(result.Files, diffFileResult{
-				FileDiff: diff.FileDiff{
-					Path:  line,
-					IsNew: true,
-				},
-				IsUntracked: true,
-			})
+			result.Untracked = append(result.Untracked, line)
 		}
 	}
 
-	if len(result.Files) == 0 {
+	if len(result.Files) == 0 && len(result.Untracked) == 0 {
 		return nil, output.NewValidationError(
 			"no uncommitted changes",
 			"There is nothing to commit.",
@@ -231,11 +224,6 @@ func printDiffTTY(result *diffResult) {
 			suffix = ", deleted"
 		}
 
-		if f.IsUntracked {
-			fmt.Fprintf(printer.Out, "%s (untracked, new file)\n", f.Path)
-			continue
-		}
-
 		if f.IsBinary {
 			fmt.Fprintf(printer.Out, "%s (binary%s)\n", f.Path, suffix)
 			continue
@@ -250,27 +238,35 @@ func printDiffTTY(result *diffResult) {
 			fmt.Fprintf(printer.Out, "  [%d] %s  %s\n", h.Index, header, hunkLineSummary(h))
 		}
 	}
+
+	for i, p := range result.Untracked {
+		if i == 0 && len(result.Files) > 0 {
+			fmt.Fprintln(printer.Out)
+		}
+		fmt.Fprintf(printer.Out, "%s (untracked, new file)\n", p)
+	}
 }
 
 func printDiffJSON(result *diffResult) error {
 	out := diffOutputJSON{
-		Files:    make([]diffFileJSON, 0, len(result.Files)),
-		Warnings: result.Warnings,
+		Files:     make([]diffFileJSON, 0, len(result.Files)),
+		Untracked: result.Untracked,
+		Warnings:  result.Warnings,
 	}
 
 	for _, f := range result.Files {
 		jf := diffFileJSON{
-			Path:        f.Path,
-			Hunks:       make([]diffHunkJSON, 0, len(f.Hunks)),
-			IsNew:       f.IsNew,
-			IsDeleted:   f.IsDeleted,
-			IsRenamed:   f.IsRenamed,
-			OldPath:     f.OldPath,
-			IsBinary:    f.IsBinary,
-			IsUntracked: f.IsUntracked,
+			Path:      f.Path,
+			Hunks:     make([]diffHunkJSON, 0, len(f.Hunks)),
+			IsNew:     f.IsNew,
+			IsDeleted: f.IsDeleted,
+			IsRenamed: f.IsRenamed,
+			OldPath:   f.OldPath,
+			IsBinary:  f.IsBinary,
 			// In the unstaged diff, a tracked-new file can only appear via
-			// an intent-to-add index entry.
-			IsIntentToAdd: f.IsNew && !f.IsUntracked,
+			// an intent-to-add index entry (plain untracked files are listed
+			// in the top-level untracked array instead).
+			IsIntentToAdd: f.IsNew,
 		}
 
 		for _, h := range f.Hunks {

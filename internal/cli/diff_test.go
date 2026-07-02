@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
 	"github.com/deligoez/hc/internal/output"
 )
@@ -63,7 +64,7 @@ func TestDiffModifiedFile(t *testing.T) {
 	}
 
 	// Find the main.go file
-	var found *diffFileResult
+	var found *diff.FileDiff
 	for i := range result.Files {
 		if result.Files[i].Path == "main.go" {
 			found = &result.Files[i]
@@ -108,21 +109,20 @@ func TestDiffNewFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var found *diffFileResult
-	for i := range result.Files {
-		if result.Files[i].Path == "new.go" {
-			found = &result.Files[i]
+	found := false
+	for _, p := range result.Untracked {
+		if p == "new.go" {
+			found = true
 			break
 		}
 	}
-	if found == nil {
-		t.Fatal("new.go not found in diff output")
+	if !found {
+		t.Fatal("new.go should be listed in the top-level untracked array")
 	}
-	if !found.IsNew {
-		t.Error("expected IsNew=true for untracked file")
-	}
-	if !found.IsUntracked {
-		t.Error("expected IsUntracked=true for untracked file")
+	for _, f := range result.Files {
+		if f.Path == "new.go" {
+			t.Error("plain untracked files must not appear in files[]")
+		}
 	}
 }
 
@@ -149,7 +149,7 @@ func TestDiffDeletedFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var found *diffFileResult
+	var found *diff.FileDiff
 	for i := range result.Files {
 		if result.Files[i].Path == "remove.go" {
 			found = &result.Files[i]
@@ -189,7 +189,7 @@ func TestDiffBinaryFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var found *diffFileResult
+	var found *diff.FileDiff
 	for i := range result.Files {
 		if result.Files[i].Path == "image.png" {
 			found = &result.Files[i]
@@ -283,14 +283,13 @@ func TestDiffJSONOutput(t *testing.T) {
 	}
 	for _, fd := range result.Files {
 		jf := diffFileJSON{
-			Path:        fd.Path,
-			Hunks:       make([]diffHunkJSON, 0, len(fd.Hunks)),
-			IsNew:       fd.IsNew,
-			IsDeleted:   fd.IsDeleted,
-			IsRenamed:   fd.IsRenamed,
-			OldPath:     fd.OldPath,
-			IsBinary:    fd.IsBinary,
-			IsUntracked: fd.IsUntracked,
+			Path:      fd.Path,
+			Hunks:     make([]diffHunkJSON, 0, len(fd.Hunks)),
+			IsNew:     fd.IsNew,
+			IsDeleted: fd.IsDeleted,
+			IsRenamed: fd.IsRenamed,
+			OldPath:   fd.OldPath,
+			IsBinary:  fd.IsBinary,
 		}
 		for _, h := range fd.Hunks {
 			jf.Hunks = append(jf.Hunks, diffHunkJSON{
