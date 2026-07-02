@@ -215,17 +215,30 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	for _, path := range collectPlanFilePaths(p) {
 		planned[path] = true
 	}
-	var warnings []string
+	var skippedITA []string
 	kept := make([]diff.FileDiff, 0, len(parsedFiles))
 	for _, fd := range parsedFiles {
 		if fd.IsNew && !planned[fd.Path] {
-			warnings = append(warnings, fmt.Sprintf(
-				"skipped unplanned intent-to-add file %s (never staged by hc; add it to a commit to include it)", fd.Path))
+			skippedITA = append(skippedITA, fd.Path)
 			continue
 		}
 		kept = append(kept, fd)
 	}
 	parsedFiles = kept
+
+	var warnings []string
+	switch {
+	case len(skippedITA) == 0:
+	case len(skippedITA) <= 5:
+		for _, path := range skippedITA {
+			warnings = append(warnings, fmt.Sprintf(
+				"skipped unplanned intent-to-add file %s (never staged by hc; add it to a commit to include it)", path))
+		}
+	default:
+		warnings = append(warnings, fmt.Sprintf(
+			"skipped %d unplanned intent-to-add files (never staged by hc; add paths to a commit to include them): %s, ... (+%d more)",
+			len(skippedITA), strings.Join(skippedITA[:5], ", "), len(skippedITA)-5))
+	}
 	if len(parsedFiles) == 0 {
 		revertIntent()
 		return nil, output.NewValidationError(
