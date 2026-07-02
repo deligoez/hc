@@ -50,7 +50,24 @@ func newRunCmd() *cobra.Command {
 
 			result, acErr := runPlan(planData, runner, dryRun)
 			if acErr != nil {
-				printer.PrintError(acErr)
+				// Execution failures carry a partial result: report which
+				// commits were created (with SHAs) so the agent can re-plan
+				// only the remaining changes.
+				if r, ok := result.(*output.Result); ok && r != nil && len(r.Commits) > 0 {
+					if printer.UseJSON() {
+						printer.PrintJSON(r)
+					} else {
+						for _, cr := range r.Commits {
+							if cr.Status == "committed" {
+								printer.Info("[%d] %s %s", cr.Index, cr.SHA, cr.Message)
+							}
+						}
+						printer.Info("committed %d/%d", r.Committed, r.Total)
+						printer.PrintError(acErr)
+					}
+				} else {
+					printer.PrintError(acErr)
+				}
 				return &exitError{code: acErr.Code}
 			}
 
@@ -354,6 +371,7 @@ func executePlan(p *plan.Plan, origFiles []diff.FileDiff, runner *git.Runner, ad
 				result.Hint = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
 			}
 			result.Error = cr.Error
+			result.Code = 3
 
 			// Clean up orphaned intent-to-add files.
 			cleanupOrphanedIntentToAdd(runner, addedNFiles)

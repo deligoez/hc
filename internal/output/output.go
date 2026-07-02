@@ -16,6 +16,7 @@ type Result struct {
 	Total     int            `json:"total"`
 	Commits   []CommitResult `json:"commits"`
 	Error     string         `json:"error,omitempty"`
+	Code      int            `json:"code,omitempty"`
 	Hint      string         `json:"hint,omitempty"`
 }
 

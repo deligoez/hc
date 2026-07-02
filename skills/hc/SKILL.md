@@ -140,7 +140,7 @@ Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you
 | Exit | Meaning | Recovery |
 |------|---------|----------|
 | 2 | Validation error. **No git state changed.** | Fix the plan per the `hint`, retry the same `hc run`. |
-| 3 | Execution error mid-plan. Some commits may exist. | Read `hint`: "Commits 0-N are done" means those are committed. Run `hc diff --json` again and write a NEW plan for the remaining changes only. |
+| 3 | Execution error mid-plan. Some commits may exist. | The JSON result lists every commit with `status` and `sha` -- committed ones are done. Run `hc diff --json` again and write a NEW plan for the remaining changes only. |
 
 Common validation errors:
 - `staging area is not clean` -- something is pre-staged. Run `git reset HEAD`, then retry.
