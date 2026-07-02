@@ -129,7 +129,7 @@ func TestPropertyRandomRewrites(t *testing.T) {
 			}
 
 			planJSON := `{"rewrites":[` + strings.Join(rewrites, ",") + `]}`
-			res, acErr := runRewrite([]byte(planJSON), r, false, false)
+			res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 			if acErr != nil {
 				t.Fatalf("rewrite failed (seed %d): %s | %s\nplan: %s", seed, acErr.Message, acErr.Hint, planJSON)
 			}

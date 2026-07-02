@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func TestRewriteSplitHeadCommitPerFile(t *testing.T) {
 		{"message":"feat: update a","files":[{"path":"a.txt"}]},
 		{"message":"feat: update b","files":[{"path":"b.txt"}]}]}]}`, big)
 
-	res, acErr := runRewrite([]byte(planJSON), r, false, false)
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v %s", acErr, acErr.Hint)
 	}
@@ -88,7 +89,7 @@ func TestRewriteSplitMiddleCommitPreservesDownstream(t *testing.T) {
 		{"message":"part 1","files":[{"path":"a.txt"}]},
 		{"message":"part 2","files":[{"path":"b.txt"}]}]}]}`, mid)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
@@ -121,7 +122,7 @@ func TestRewriteHunkLevelSplitWithinFile(t *testing.T) {
 		{"message":"edit A","files":[{"path":"f.txt","hunks":[0]}]},
 		{"message":"edit B","files":[{"path":"f.txt","hunks":[1]}]}]}]}`, big)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
@@ -149,7 +150,7 @@ func TestRewriteNewAndDeletedFiles(t *testing.T) {
 		{"message":"chore: drop old.txt","files":[{"path":"old.txt"}]},
 		{"message":"feat: add new.txt","files":[{"path":"new.txt"}]}]}]}`, big)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
@@ -172,7 +173,7 @@ func TestRewriteCoverageViolationLeavesBranchUntouched(t *testing.T) {
 	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
 		{"message":"only a","files":[{"path":"a.txt"}]}]}]}`, big)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || acErr.Code != 2 {
 		t.Fatalf("want validation error, got %v", acErr)
 	}
@@ -210,14 +211,14 @@ func TestRewriteRejectsMergeAndForeignCommits(t *testing.T) {
 
 	// Splitting the merge itself is rejected.
 	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"a.txt"}]}]}]}`, mergeSHA)
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "merge") {
 		t.Fatalf("merge commit should be rejected, got %v", acErr)
 	}
 
 	// A commit only reachable through the side branch (not first-parent) is rejected.
 	planJSON = fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"s.txt"}]}]}]}`, sideSHA)
-	_, acErr = runRewrite([]byte(planJSON), r, false, false)
+	_, acErr = runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "first-parent") {
 		t.Fatalf("foreign commit should be rejected, got %v", acErr)
 	}
@@ -227,7 +228,7 @@ func TestRewriteRejectsMergeAndForeignCommits(t *testing.T) {
 		{"message":"a3","files":[{"path":"a.txt"}]},
 		{"message":"b","files":[{"path":"b.txt"}]}]}]}`, target)
 	oldHead, _ := r.ResolveSHA("HEAD")
-	_, acErr = runRewrite([]byte(planJSON), r, false, false)
+	_, acErr = runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("split above merge failed: %v", acErr)
 	}
@@ -240,7 +241,7 @@ func TestRewriteRootCommitRejected(t *testing.T) {
 	root, err := r.Run("rev-list", "--max-parents=0", "HEAD")
 	must(t, err)
 	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"y"}]}]}]}`, strings.TrimSpace(root))
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "root commit") {
 		t.Fatalf("root commit should be rejected, got %v", acErr)
 	}
@@ -264,13 +265,13 @@ func TestRewritePushedGuardAndForce(t *testing.T) {
 		{"message":"a","files":[{"path":"a.txt"}]},
 		{"message":"b","files":[{"path":"b.txt"}]}]}]}`, big)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "remote") {
 		t.Fatalf("pushed commit should require --force, got %v", acErr)
 	}
 
 	oldHead, _ := r.ResolveSHA("HEAD")
-	_, acErr = runRewrite([]byte(planJSON), r, false, true)
+	_, acErr = runRewrite([]byte(planJSON), r, rewriteOpts{force: true})
 	if acErr != nil {
 		t.Fatalf("--force rewrite failed: %v", acErr)
 	}
@@ -288,7 +289,7 @@ func TestRewriteDryRunMovesNothing(t *testing.T) {
 		{"message":"a","files":[{"path":"a.txt"}]},
 		{"message":"b","files":[{"path":"b.txt"}]}]}]}`, big)
 
-	res, acErr := runRewrite([]byte(planJSON), r, true, false)
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{dryRun: true})
 	if acErr != nil {
 		t.Fatalf("dry-run failed: %v", acErr)
 	}
@@ -324,7 +325,7 @@ func TestRewritePreservesAuthorAndWorkingTree(t *testing.T) {
 	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
 		{"message":"a part","files":[{"path":"a.txt"}]},
 		{"message":"b part","files":[{"path":"b.txt"}]}]}]}`, big)
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
@@ -364,7 +365,7 @@ func TestRewriteMultipleCommitsInOnePlan(t *testing.T) {
 			{"message":"2a","files":[{"path":"a.txt"}]},
 			{"message":"2b","files":[{"path":"b.txt"}]}]}]}`, first, second)
 
-	_, acErr := runRewrite([]byte(planJSON), r, false, false)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
@@ -385,7 +386,7 @@ func TestLogListsCommitsWithHunks(t *testing.T) {
 	mkCommit(t, r, dir, "edit a", map[string]string{"a.txt": "one\nTWO\nthree\n"})
 	mkCommit(t, r, dir, "add b", map[string]string{"b.txt": "b\n"})
 
-	res, acErr := runLog(r, baseSHA+"..HEAD")
+	res, acErr := runLog(r, baseSHA+"..HEAD", false)
 	if acErr != nil {
 		t.Fatalf("runLog failed: %v", acErr)
 	}
@@ -403,3 +404,128 @@ func TestLogListsCommitsWithHunks(t *testing.T) {
 		t.Fatal("added file should be marked is_new")
 	}
 }
+
+func TestRewritePreservesMidRangeMerge(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	mkCommit(t, r, dir, "base", map[string]string{"a.txt": "a\n", "b.txt": "b\n"})
+	big := mkCommit(t, r, dir, "big below merge", map[string]string{"a.txt": "a2\n", "b.txt": "b2\n"})
+
+	// Side branch + merge ABOVE the split target.
+	must(t, run(r, "checkout", "-qb", "side", "HEAD~1"))
+	mkCommit(t, r, dir, "side work", map[string]string{"s.txt": "s\n"})
+	must(t, run(r, "checkout", "-q", "-"))
+	must(t, run(r, "merge", "-q", "--no-ff", "-m", "merge side", "side"))
+	mkCommit(t, r, dir, "after merge", map[string]string{"a.txt": "a3\n"})
+	oldHead, _ := r.ResolveSHA("HEAD")
+
+	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
+		{"message":"a2","files":[{"path":"a.txt"}]},
+		{"message":"b2","files":[{"path":"b.txt"}]}]}]}`, big)
+
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
+	if acErr != nil {
+		t.Fatalf("rewrite across a mid-range merge failed: %v | %s", acErr, acErr.Hint)
+	}
+	assertSameContent(t, r, oldHead, "HEAD")
+	if !res.TreeIdentical {
+		t.Fatal("tree_identical must be true")
+	}
+	// The merge survives with two parents and its second parent unchanged.
+	parents, _ := r.Run("log", "-1", "--format=%P", "HEAD~1")
+	if len(strings.Fields(parents)) != 2 {
+		t.Fatalf("merge lost its parents: %q", parents)
+	}
+	sideTip, _ := r.ResolveSHA("side")
+	if !strings.Contains(parents, sideTip) {
+		t.Fatal("merge's second parent must stay the original side tip")
+	}
+	if res.Summary.Split != 1 || res.Summary.Replacements != 2 || res.Summary.Kept != 2 || res.Summary.TotalAfter != 4 {
+		t.Fatalf("summary wrong: %+v", res.Summary)
+	}
+}
+
+func TestRewriteProtectRefusesUpstreamCommits(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	mkCommit(t, r, dir, "upstream work", map[string]string{"a.txt": "a\n", "b.txt": "b\n"})
+	upstream, _ := r.ResolveSHA("HEAD")
+	must(t, run(r, "branch", "develop")) // simulates origin/develop
+	mine := mkCommit(t, r, dir, "my big", map[string]string{"a.txt": "a2\n", "b.txt": "b2\n"})
+
+	// Trying to split the upstream commit with --protect develop is refused.
+	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
+		{"message":"a","files":[{"path":"a.txt"}]},
+		{"message":"b","files":[{"path":"b.txt"}]}]}]}`, upstream)
+	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{protect: []string{"develop"}})
+	if acErr == nil || !strings.Contains(acErr.Message, "protected") {
+		t.Fatalf("protected commit should be refused, got %v", acErr)
+	}
+
+	// My own commit above the protected ref splits fine with the same flag.
+	planJSON = fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
+		{"message":"a2","files":[{"path":"a.txt"}]},
+		{"message":"b2","files":[{"path":"b.txt"}]}]}]}`, mine)
+	oldHead, _ := r.ResolveSHA("HEAD")
+	_, acErr = runRewrite([]byte(planJSON), r, rewriteOpts{protect: []string{"develop"}})
+	if acErr != nil {
+		t.Fatalf("own commit should split under --protect: %v", acErr)
+	}
+	assertSameContent(t, r, oldHead, "HEAD")
+}
+
+func TestRewriteSummaryOnlyOmitsReplacements(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	mkCommit(t, r, dir, "base", map[string]string{"a.txt": "a\n", "b.txt": "b\n"})
+	big := mkCommit(t, r, dir, "big", map[string]string{"a.txt": "a2\n", "b.txt": "b2\n"})
+
+	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[
+		{"message":"a","files":[{"path":"a.txt"}]},
+		{"message":"b","files":[{"path":"b.txt"}]}]}]}`, big)
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{summaryOnly: true})
+	if acErr != nil {
+		t.Fatalf("rewrite failed: %v", acErr)
+	}
+	if len(res.Rewrites) != 0 {
+		t.Fatal("--summary must omit per-rewrite replacement lists")
+	}
+	if res.Summary.Split != 1 || res.Summary.Replacements != 2 {
+		t.Fatalf("summary counts wrong: %+v", res.Summary)
+	}
+}
+
+func TestSplitEmitsFileFirstPlanThatRewriteAccepts(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	baseSHA := mkCommit(t, r, dir, "base", map[string]string{"a.txt": "a\n", "b.txt": "b\n", "c.txt": "c\n"})
+	mkCommit(t, r, dir, "WB-7: feat: multi one", map[string]string{"a.txt": "a2\n", "b.txt": "b2\n"})
+	mkCommit(t, r, dir, "single-file commit", map[string]string{"c.txt": "c2\n"})
+	mkCommit(t, r, dir, "WB-8: feat: multi two", map[string]string{"a.txt": "a3\n", "c.txt": "c3\n"})
+	oldHead, _ := r.ResolveSHA("HEAD")
+
+	rp, skipped, acErr := runSplit(r, baseSHA+"..HEAD", "{subject} ({basename})")
+	if acErr != nil {
+		t.Fatalf("split failed: %v", acErr)
+	}
+	if len(rp.Rewrites) != 2 || skipped != 1 {
+		t.Fatalf("want 2 rewrites + 1 skipped, got %d/%d", len(rp.Rewrites), skipped)
+	}
+	if rp.Rewrites[0].Commits[0].Message != "WB-7: feat: multi one (a.txt)" {
+		t.Fatalf("template not applied: %q", rp.Rewrites[0].Commits[0].Message)
+	}
+
+	// The emitted plan is directly executable by hc rewrite.
+	planJSON, err := jsonMarshal(rp)
+	must(t, err)
+	res, acErr := runRewrite(planJSON, r, rewriteOpts{})
+	if acErr != nil {
+		t.Fatalf("emitted plan rejected by rewrite: %v | %s", acErr, acErr.Hint)
+	}
+	assertSameContent(t, r, oldHead, "HEAD")
+	if res.Summary.Split != 2 || res.Summary.Replacements != 4 || res.Summary.Kept != 1 {
+		t.Fatalf("summary wrong: %+v", res.Summary)
+	}
+}
+
+func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
