@@ -42,6 +42,8 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 | `hc run <plan.json>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc log <base>..<head>` | Per-commit indexed hunks (input for `hc rewrite`) |
+| `hc rewrite <plan>` | Split existing commits (conflict-free history rewrite, backup ref) |
 | `hc --version` | Show version |
 
 ## Plan Format
@@ -75,6 +77,8 @@ internal/
     root.go                   Cobra root, --json/--quiet/--no-color flags
     diff.go                   hc diff command
     run.go                    hc run command (Phase 1 + Phase 2)
+    log.go                    hc log command (per-commit hunks for rewrite)
+    rewrite.go                hc rewrite command (conflict-free history splitting)
     exitcodes.go              Exit 0/2/3
   diff/
     types.go                  FileDiff, Hunk, Line types
@@ -85,11 +89,13 @@ internal/
     plan.go                   Plan, Commit, FileEntry types
     parse.go                  JSON parser with validation
     validate.go               Coverage validation + field validation
+    rewrite.go                RewritePlan types + parsing
   git/
     git.go                    Git command runner
     diff.go                   Diff, IntentToAdd, IsUntracked helpers
     commit.go                 Commit, Add, ResetHead helpers
     index.go                  hash-object / update-index staging helpers
+    history.go                commit-tree / read-tree / rev-list helpers for rewrite
   output/
     output.go                 Result types, ACError, TTY/JSON printer
 skills/hc/SKILL.md            Agent skill for Claude Code

@@ -94,7 +94,20 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 | `hc run <plan>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc log <base>..<head>` | Per-commit indexed hunks (input for `hc rewrite`) |
+| `hc rewrite <plan>` | Split existing commits -- conflict-free history rewrite with backup ref |
 | `hc --version` | Show version |
+
+## Splitting Existing Commits
+
+Too-coarse commits that already exist (pre-hc history, over-grouped runs) can be split retroactively:
+
+```bash
+hc log main..HEAD --json     # per-commit indexed hunks, same schema as hc diff
+hc rewrite plan.json         # {"rewrites":[{"commit":"<sha>","commits":[...]}]}
+```
+
+Each split must reproduce the original commit's tree byte-for-byte (verified), so downstream commits re-parent without conflicts, the working tree is never touched, and the branch moves in one atomic step with the old head saved at `refs/hc/backup/<branch>`. Author identities/dates are preserved; pushed commits require `--force`.
 
 ## Plan Format
 
