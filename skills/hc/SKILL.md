@@ -92,18 +92,26 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - **Do NOT put untracked paths into `allow_unplanned` or into commits "to satisfy coverage".** Coverage validation only covers files with hunks in the diff. Entries in the top-level `untracked` array require NOTHING from you; reference one only when you actually want that new file committed. If you think hc demanded an untracked file, re-read the error -- it was about a different (tracked or intent-to-add) file.
 - **Do NOT run `git diff`, `git add`, or `git commit` alongside hc.** `hc diff --json` has everything; `hc run` does all staging.
 - **Do NOT re-run `hc diff` between commits of one plan.** One read, one plan, one run.
+- **Do NOT bundle same-kind work across files** ("add tests for X, Y and Z" in one commit). Unless it is a mechanical sweep or an inseparable change, every file is its own commit.
 
 ## Commit Granularity -- the most important rule
 
 Agents systematically err toward commits that are TOO BIG. Default to splitting.
 
-- **One reviewable idea per commit.** If you would need "and" in the commit message, split it: `feat(auth): add login endpoint and fix token expiry` is two commits.
-- **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit unless inseparable (a rename that the feature requires, for example).
-- **Same file is NOT a reason to combine.** Five new tests in one file = five commits (one hunk each). Use the `section` field to see which function each hunk touches.
-- **Different subsystems = different commits**, even for the same kind of change.
-- **The litmus test:** could `git revert` of this commit undo exactly one decision? If it would drag unrelated changes along, split.
-- Combine only when hunks are mutually dependent -- code + the type it requires, a call site + the signature change it follows.
+**The default unit is ONE FILE PER COMMIT.** A commit containing two or more files must justify itself against exactly two exceptions:
+
+1. **Mechanical sweep:** the SAME repetitive transformation applied across many files -- a lint/format run, a rename, a comment reword, a codemod, an import reorder. One commit, message names the sweep (`style: apply linter across services`). The test: the per-file diffs are interchangeable in kind; describing one describes all.
+2. **Inseparable change:** files that cannot compile or pass independently -- a signature change plus its call sites, code plus the new type it requires. Keep this narrow: "related" is NOT "inseparable". Same feature, same ticket, same directory are NOT reasons to combine.
+
+Everything else splits:
+
+- **Same KIND of change across files is not a sweep.** "Fork the Store* action tests" over 9 files is 9 commits (`test: fork StoreOrderAction test`, `test: fork StorePaymentAction test`, ...) -- each file reviews and reverts on its own. A sweep transforms existing lines mechanically; writing/forking N distinct files is N pieces of work.
+- **Split within a file too.** If a file's hunks carry separable ideas (use `section`/`content` to judge), give each its own commit -- five new tests in one file = five commits.
+- **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit.
+- **The litmus tests:** (a) would the commit message still be accurate for each file alone? Then each file is its own commit. (b) Could `git revert` of this commit undo exactly one decision?
 - **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
+
+Do not fear high commit counts: 30 one-file commits are better than 6 bundles. hc executes large plans cheaply.
 
 ## Commit Ordering
 
@@ -136,18 +144,25 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 }
 ```
 
-**Feature + test across files:**
+**Feature + tests, one file per commit (default granularity):**
 ```json
 {
   "commits": [
-    {
-      "message": "feat(auth): add refresh endpoint",
-      "files": [{"path": "auth.go", "hunks": [0, 1]}, {"path": "handler.go"}]
-    },
-    {
-      "message": "test(auth): add refresh endpoint tests",
-      "files": [{"path": "auth_test.go"}, {"path": "handler_test.go"}]
-    }
+    {"message": "feat(auth): add refresh endpoint", "files": [{"path": "auth.go", "hunks": [0, 1]}]},
+    {"message": "feat(auth): route refresh endpoint", "files": [{"path": "handler.go"}]},
+    {"message": "test(auth): cover refresh endpoint", "files": [{"path": "auth_test.go"}]},
+    {"message": "test(auth): cover refresh routing", "files": [{"path": "handler_test.go"}]}
+  ]
+}
+```
+
+**Mechanical sweep -- the one legitimate many-files commit:**
+```json
+{
+  "commits": [
+    {"message": "style: apply linter across services", "files": [
+      {"path": "svc/a.go"}, {"path": "svc/b.go"}, {"path": "svc/c.go"}
+    ]}
   ]
 }
 ```
