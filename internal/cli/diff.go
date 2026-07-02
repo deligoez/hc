@@ -90,7 +90,7 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewValidationError(
 			"not a git repository",
-			"Run ac from inside a git repository.",
+			"Run hc from inside a git repository.",
 		)
 	}
 

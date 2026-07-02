@@ -88,7 +88,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewValidationError(
 			"not a git repository",
-			"Run ac from inside a git repository.",
+			"Run hc from inside a git repository.",
 		)
 	}
 
@@ -143,7 +143,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		revertIntent()
 		return nil, output.NewValidationError(
 			"staging area is not clean",
-			"Run 'git reset HEAD' first. ac requires a clean staging area.",
+			"Run 'git reset HEAD' first. hc requires a clean staging area.",
 		)
 	}
 
@@ -460,7 +460,7 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 	origIndex := filepath.Join(gitDir, "index")
 
 	// Create a temp file for the index copy.
-	tmpFile, err := os.CreateTemp("", "ac-index-*")
+	tmpFile, err := os.CreateTemp("", "hc-index-*")
 	if err != nil {
 		return output.NewExecutionError(
 			fmt.Sprintf("cannot create temp index file: %v", err),

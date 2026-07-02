@@ -156,7 +156,7 @@ func ValidateCoverage(p *Plan, files []diff.FileDiff) error {
 				// So if we reach here, the file genuinely has no changes.
 				return output.NewValidationError(
 					fmt.Sprintf("file %q has no changes in the working tree", f.Path),
-					"Only include files with uncommitted changes. Run 'ac diff' to see changed files.",
+					"Only include files with uncommitted changes. Run 'hc diff' to see changed files.",
 				)
 			}
 
@@ -183,7 +183,7 @@ func ValidateCoverage(p *Plan, files []diff.FileDiff) error {
 					if h >= len(fd.Hunks) {
 						return output.NewValidationError(
 							fmt.Sprintf("hunk index %d out of range for %s (has %d hunks, indices 0-%d)", h, f.Path, len(fd.Hunks), len(fd.Hunks)-1),
-							"Run 'ac diff --json' to see available hunks.",
+							"Run 'hc diff --json' to see available hunks.",
 						)
 					}
 

@@ -10,7 +10,7 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-// Result is the top-level output for ac run.
+// Result is the top-level output for hc run.
 type Result struct {
 	Committed int            `json:"committed"`
 	Total     int            `json:"total"`
@@ -37,7 +37,7 @@ type FileResult struct {
 	Hunks    []int  `json:"hunks,omitempty"`
 }
 
-// DryRunResult is the JSON output for ac run --dry-run.
+// DryRunResult is the JSON output for hc run --dry-run.
 type DryRunResult struct {
 	Valid         bool            `json:"valid"`
 	Commits       int             `json:"commits"`

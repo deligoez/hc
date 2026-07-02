@@ -104,7 +104,7 @@ func MatchHunks(original, current []Hunk) (map[int]int, error) {
 
 		return nil, output.NewExecutionError(
 			fmt.Sprintf("no matching hunk found for original hunk %d (old_start=%d)", oi, oh.OldStart),
-			"Hunk content changed between validation and execution. Re-run 'ac diff' and rebuild the plan.",
+			"Hunk content changed between validation and execution. Re-run 'hc diff' and rebuild the plan.",
 		)
 	}
 
