@@ -86,9 +86,10 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 4. **Untracked files (`"is_untracked": true`) must omit `hunks`.** They have no hunk indices yet; full-file mode is the only option for them.
 5. **Full-file mode for simple cases.** If an entire file belongs in one commit, omit `hunks`.
 6. **Binary files must omit `hunks`.**
-7. **Conventional commit messages** following the project's convention.
-8. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
-9. **Check `warnings`** in the JSON output -- e.g. pre-staged changes that `hc run` will reject.
+7. **Renamed/moved files appear as TWO entries** -- a deletion at the old path and an untracked file at the new path. Plan both (`{"path": "old.go"}` and `{"path": "new.go"}`); git shows them as a rename in history automatically.
+8. **Conventional commit messages** following the project's convention.
+9. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
+10. **Check `warnings`** in the JSON output -- e.g. pre-staged changes that `hc run` will reject.
 
 ## Common Patterns
 

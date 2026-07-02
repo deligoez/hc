@@ -101,7 +101,7 @@ spec/0.1.0.md                 Full specification
 
 ### Two-Phase Execution
 
-- **Phase 1 (Validation):** Parse plan, capture diff (`git diff -U0 -M`), validate coverage (every hunk assigned), sequential dry-run with temporary index (`GIT_INDEX_FILE`). If anything fails: exit 2, no git state changed.
+- **Phase 1 (Validation):** Parse plan, capture diff (`git diff -U0 --no-renames`), validate coverage (every hunk assigned), sequential dry-run with temporary index (`GIT_INDEX_FILE`). If anything fails: exit 2, no git state changed.
 - **Phase 2 (Execution):** For each commit: re-diff per file against current index, match hunks by content fingerprint, build adjusted patch via delta accumulation, apply, commit.
 
 ### Key Algorithms
@@ -121,7 +121,7 @@ spec/0.1.0.md                 Full specification
 
 - New (untracked) files via `git add -N` before diff capture
 - Deleted files via `git add`
-- Renamed files via `git diff -M` rename detection
+- Renamed files as delete+add (`--no-renames`; git reconstructs renames at display time)
 - Binary files (full-file only, hunk-select = validation error)
 - No-trailing-newline files (`\ No newline at end of file` marker)
 - Adjacent hunk merging by git (automatic sub-patch extraction via `BuildCompositePatch`)
@@ -132,7 +132,7 @@ spec/0.1.0.md                 Full specification
 - Error messages and hints must match spec Section 6.2 exactly
 - Exit code 2 for all validation errors, 3 for execution errors
 - `--no-ext-diff` flag on all git diff calls (bypass external diff tools)
-- `-M` flag on diff calls for rename detection
+- `--no-renames` on diff calls: renames are committed as delete+add (detection-at-run-time silently dropped old-path deletions from coverage)
 - Tests use real git repos via `t.TempDir()`
 - All validation errors revert `git add -N` operations before returning
 

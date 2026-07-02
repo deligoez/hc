@@ -152,7 +152,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	}
 
 	// --- Step 5: Capture diff ---
-	rawDiff, err := runner.Diff("-U0", "-M", "--no-ext-diff")
+	rawDiff, err := runner.Diff("-U0", "--no-renames", "--no-ext-diff")
 	if err != nil {
 		revertIntent()
 		return nil, output.NewExecutionError(

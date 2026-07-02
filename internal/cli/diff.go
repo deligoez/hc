@@ -106,7 +106,7 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 	}
 
 	// Get unstaged diff
-	raw, err := runner.Diff("-U0", "-M", "--no-ext-diff")
+	raw, err := runner.Diff("-U0", "--no-renames", "--no-ext-diff")
 	if err != nil {
 		return nil, output.NewExecutionError(
 			fmt.Sprintf("failed to run git diff: %v", err),
