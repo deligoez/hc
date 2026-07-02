@@ -60,13 +60,29 @@ type DryRunIssue struct {
 
 // RewriteResult is the top-level output for hc rewrite.
 type RewriteResult struct {
-	Branch       string           `json:"branch"`
-	OldHead      string           `json:"old_head"`
-	NewHead      string           `json:"new_head"`
-	BackupRef    string           `json:"backup_ref,omitempty"`
-	TotalCommits int              `json:"total_commits"`
-	Rewrites     []RewriteMapping `json:"rewrites"`
-	DryRun       bool             `json:"dry_run,omitempty"`
+	Branch    string `json:"branch"`
+	OldHead   string `json:"old_head"`
+	NewHead   string `json:"new_head"`
+	BackupRef string `json:"backup_ref,omitempty"`
+	// TreeIdentical is always true on success: the rebuilt head's tree is
+	// byte-for-byte the old head's tree, so build/test results are
+	// guaranteed unchanged -- no re-verification needed.
+	TreeIdentical bool             `json:"tree_identical"`
+	Summary       RewriteSummary   `json:"summary"`
+	Rewrites      []RewriteMapping `json:"rewrites,omitempty"`
+	DryRun        bool             `json:"dry_run,omitempty"`
+}
+
+// RewriteSummary counts what the rewrite did within the rebuilt range.
+type RewriteSummary struct {
+	// Split is the number of original commits that were split.
+	Split int `json:"split"`
+	// Replacements is the total number of commits the splits produced.
+	Replacements int `json:"replacements"`
+	// Kept is the number of untouched commits re-parented as-is.
+	Kept int `json:"kept"`
+	// TotalAfter is the rebuilt range's commit count (kept + replacements).
+	TotalAfter int `json:"total_after"`
 }
 
 // RewriteMapping maps one original commit to its replacements.
