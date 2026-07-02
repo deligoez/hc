@@ -13,13 +13,6 @@ import (
 // it is assigned. If multiple candidates share the same fingerprint, the one with the
 // smallest |original.OldStart - candidate.OldStart| is chosen (ties broken by smaller
 // OldStart). Assigned current hunks are removed from the candidate pool.
-// Returns an error if any original hunk has no matching candidate.
-// MatchHunks maps original hunk indices to current hunk indices by content fingerprint.
-// It uses a greedy algorithm: for each original hunk (in order), it finds candidates
-// in the current hunks with matching fingerprints. If exactly one candidate exists,
-// it is assigned. If multiple candidates share the same fingerprint, the one with the
-// smallest |original.OldStart - candidate.OldStart| is chosen (ties broken by smaller
-// OldStart). Assigned current hunks are removed from the candidate pool.
 //
 // Fallback: if no exact fingerprint match is found, the algorithm tries content-subset
 // matching. This handles the case where git merges adjacent hunks after earlier commits
