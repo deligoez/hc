@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,7 +13,6 @@ import (
 	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
 	"github.com/deligoez/hc/internal/output"
-	"github.com/deligoez/hc/internal/patch"
 	"github.com/deligoez/hc/internal/plan"
 )
 
@@ -213,8 +213,15 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		return nil, output.NewValidationError(err.Error(), "")
 	}
 
-	// --- Step 9: Sequential dry-run with temp index ---
-	if valErr := validateWithTempIndex(p, parsedFiles, runner); valErr != nil {
+	// --- Step 8b: Capture base content for every hunk-mode file ---
+	states, acErr := buildFileStates(p, parsedFiles, runner)
+	if acErr != nil {
+		revertIntent()
+		return nil, acErr
+	}
+
+	// --- Step 9: Validate reconstruction + simulate on a temp index ---
+	if valErr := validateWithTempIndex(p, states, runner); valErr != nil {
 		revertIntent()
 		return nil, valErr
 	}
@@ -227,7 +234,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	}
 
 	// --- Phase 2: Execute the plan ---
-	result, acErr := executePlan(p, parsedFiles, runner, intentAdded)
+	result, acErr := executePlan(p, states, runner, intentAdded)
 	if acErr != nil {
 		return result, acErr
 	}
@@ -235,132 +242,148 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	// After successful execution, do NOT revert intent-to-add entries.
 	// Files that were committed via git add (full-file mode) are now properly
 	// in the repository. Reverting them (git rm --cached) would corrupt the index.
-	// Files that were committed via hunk-select (git apply --cached) also
-	// have their content properly staged and committed.
+	// Files that were committed via hunk-select also have their content
+	// properly staged and committed.
 	// Only revert intent-to-add on FAILURE paths (already handled above).
 
 	return result, nil
 }
 
-// stageError describes a failure while preparing a hunk-select patch.
+// fileState holds everything needed to rebuild a hunk-mode file's staged
+// content at any point in the plan: the parsed diff and the file's base
+// content (its stage-0 index blob at capture time). Staged content for a
+// commit is always Reconstruct(base, union of committed+current hunks) --
+// original diff coordinates, immune to line drift, hunk merging, or git
+// re-splitting hunks over repeated content.
+type fileState struct {
+	fd   *diff.FileDiff
+	base []byte
+}
+
+// stageError describes a failure while staging a file entry.
 type stageError struct {
 	msg  string
 	hint string
 }
 
-// buildHunkPatch re-diffs a file against the runner's current index, matches
-// the planned original hunks to the current hunks (by fingerprint, with
-// content-subset fallback for merged hunks), and builds an applyable patch.
-// It is shared by the temp-index validation pass and real execution: the only
-// difference between the two is which index the runner points at.
-func buildHunkPatch(runner *git.Runner, f plan.FileEntry, diffMap map[string]*diff.FileDiff) ([]byte, *stageError) {
-	// Re-diff against the runner's index.
-	reDiffOutput, err := runner.DiffFile(f.Path, "-U0", "--no-ext-diff")
+// buildFileStates fetches the base (index) content of every hunk-mode file in
+// the plan.
+func buildFileStates(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runner) (map[string]*fileState, *output.ACError) {
+	diffMap := make(map[string]*diff.FileDiff, len(parsedFiles))
+	for i := range parsedFiles {
+		diffMap[parsedFiles[i].Path] = &parsedFiles[i]
+	}
+
+	states := make(map[string]*fileState)
+	for _, c := range p.Commits {
+		for _, f := range c.Files {
+			if f.IsFullFile() || states[f.Path] != nil {
+				continue
+			}
+			fd, ok := diffMap[f.Path]
+			if !ok {
+				// Coverage validation guarantees presence; guard anyway.
+				return nil, output.NewExecutionError(
+					fmt.Sprintf("%s not found in original diff", f.Path),
+					"",
+				)
+			}
+			base, err := runner.IndexBlob(f.Path)
+			if err != nil {
+				return nil, output.NewExecutionError(
+					fmt.Sprintf("cannot read index content for %s: %v", f.Path, err),
+					"",
+				)
+			}
+			states[f.Path] = &fileState{fd: fd, base: base}
+		}
+	}
+	return states, nil
+}
+
+// stageHunkSelection stages base + union(committed, newHunks) for path into
+// the runner's index. It is shared by temp-index validation and execution:
+// the only difference is which index the runner points at.
+func stageHunkSelection(r *git.Runner, path string, st *fileState, committed map[int]bool, newHunks []int) *stageError {
+	fd := st.fd
+
+	for _, i := range newHunks {
+		if i >= len(fd.Hunks) {
+			return &stageError{msg: fmt.Sprintf("hunk %d out of range for %s", i, path)}
+		}
+	}
+
+	// A deleted file's diff is a single hunk deleting everything; selecting
+	// it stages the deletion itself, not an empty file.
+	if fd.IsDeleted {
+		if err := r.RemoveFromIndex(path); err != nil {
+			return &stageError{msg: fmt.Sprintf("cannot stage deletion of %s: %v", path, err)}
+		}
+		return nil
+	}
+
+	union := make([]int, 0, len(committed)+len(newHunks))
+	for i := range committed {
+		union = append(union, i)
+	}
+	union = append(union, newHunks...)
+	sort.Ints(union)
+
+	subset := make([]diff.Hunk, 0, len(union))
+	for _, i := range union {
+		subset = append(subset, fd.Hunks[i])
+	}
+
+	content, err := diff.Reconstruct(st.base, subset)
 	if err != nil {
-		return nil, &stageError{msg: fmt.Sprintf("cannot diff %s: %v", f.Path, err)}
+		return &stageError{
+			msg:  fmt.Sprintf("cannot reconstruct %s: %v", path, err),
+			hint: "The working tree may have changed since the diff was captured. Re-run 'hc diff' and rebuild the plan.",
+		}
 	}
 
-	currentFiles, err := diff.Parse(reDiffOutput)
+	sha, err := r.HashObjectWrite(content)
 	if err != nil {
-		return nil, &stageError{msg: fmt.Sprintf("cannot parse diff for %s: %v", f.Path, err)}
+		return &stageError{msg: fmt.Sprintf("cannot hash reconstructed content for %s: %v", path, err)}
 	}
 
-	if len(currentFiles) == 0 {
-		return nil, &stageError{
-			msg:  fmt.Sprintf("no diff for %s against current index", f.Path),
-			hint: "The file may have already been fully staged by a previous commit.",
+	mode := fd.NewMode
+	if mode == "" {
+		mode, err = r.IndexEntryMode(path)
+		if err != nil || mode == "" {
+			mode = "100644"
 		}
 	}
 
-	currentFile := currentFiles[0]
-
-	// Fingerprint the current hunks.
-	for j := range currentFile.Hunks {
-		currentFile.Hunks[j].Fingerprint = diff.Fingerprint(currentFile.Hunks[j])
+	if err := r.StageBlob(mode, sha, path); err != nil {
+		return &stageError{msg: fmt.Sprintf("cannot stage %s: %v", path, err)}
 	}
+	return nil
+}
 
-	// Get the original file diff for fingerprint matching.
-	origFile, ok := diffMap[f.Path]
-	if !ok {
-		return nil, &stageError{msg: fmt.Sprintf("%s not found in original diff", f.Path)}
-	}
-
-	// Build subset of original hunks that this file entry references.
-	origSubset := make([]diff.Hunk, 0, len(f.Hunks))
-	for _, hunkIdx := range f.Hunks {
-		if hunkIdx >= len(origFile.Hunks) {
-			return nil, &stageError{msg: fmt.Sprintf("hunk %d out of range for %s", hunkIdx, f.Path)}
+// mergeCommitted records a commit's hunk selections after the commit succeeds.
+func mergeCommitted(committed map[string]map[int]bool, c plan.Commit) {
+	for _, f := range c.Files {
+		if f.IsFullFile() {
+			continue
 		}
-		origSubset = append(origSubset, origFile.Hunks[hunkIdx])
-	}
-
-	// Match original hunks to current hunks.
-	matchMap, err := diff.MatchHunks(origSubset, currentFile.Hunks)
-	if err != nil {
-		return nil, &stageError{
-			msg:  fmt.Sprintf("hunk matching failed for %s: %v", f.Path, err),
-			hint: "A previous commit may have consumed or altered this hunk.",
+		if committed[f.Path] == nil {
+			committed[f.Path] = make(map[int]bool)
+		}
+		for _, h := range f.Hunks {
+			committed[f.Path][h] = true
 		}
 	}
-
-	// Group original hunks by their matched current hunk index.
-	currentToOrigs := make(map[int][]diff.Hunk)
-	for i, oh := range origSubset {
-		currentToOrigs[matchMap[i]] = append(currentToOrigs[matchMap[i]], oh)
-	}
-
-	// Collect unique matched current hunk indices (preserve order).
-	seen := make(map[int]bool)
-	selected := make([]int, 0, len(f.Hunks))
-	for i := 0; i < len(origSubset); i++ {
-		idx := matchMap[i]
-		if !seen[idx] {
-			selected = append(selected, idx)
-			seen[idx] = true
-		}
-	}
-
-	// Check if any selected current hunk is a merged hunk (matched via
-	// content-subset rather than exact fingerprint). Merged hunks contain
-	// lines from multiple original hunks; we must extract only our lines.
-	hasMerged := false
-	for _, ci := range selected {
-		if patch.IsMergedHunk(currentFile.Hunks[ci], currentToOrigs[ci]) {
-			hasMerged = true
-			break
-		}
-	}
-
-	var patchBytes []byte
-	if !hasMerged {
-		// Normal case: all matches are exact. Use standard BuildPatch.
-		patchBytes, err = patch.BuildPatch(currentFile, selected, currentFile.Hunks)
-	} else {
-		// Merged case: at least one current hunk is merged. Build a
-		// composite patch with sub-patches for merged hunks and full
-		// hunks for exact matches.
-		patchBytes, err = patch.BuildCompositePatch(currentFile, selected, currentFile.Hunks, currentToOrigs)
-	}
-	if err != nil {
-		return nil, &stageError{msg: fmt.Sprintf("cannot build patch for %s: %v", f.Path, err)}
-	}
-
-	return patchBytes, nil
 }
 
 // executePlan iterates over each commit in the plan, stages the appropriate
 // hunks/files, and creates real commits. On failure it returns a partial result.
-func executePlan(p *plan.Plan, origFiles []diff.FileDiff, runner *git.Runner, addedNFiles []string) (*output.Result, *output.ACError) {
+func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner, addedNFiles []string) (*output.Result, *output.ACError) {
 	result := &output.Result{Total: len(p.Commits)}
-
-	// Build a map from path to parsed file diff for quick lookup.
-	diffMap := make(map[string]*diff.FileDiff, len(origFiles))
-	for i := range origFiles {
-		diffMap[origFiles[i].Path] = &origFiles[i]
-	}
+	committed := make(map[string]map[int]bool)
 
 	for i, commit := range p.Commits {
-		cr := executeCommit(i, commit, diffMap, runner)
+		cr := executeCommit(i, commit, states, committed, runner)
 		result.Commits = append(result.Commits, cr)
 
 		if cr.Status == "failed" {
@@ -379,6 +402,7 @@ func executePlan(p *plan.Plan, origFiles []diff.FileDiff, runner *git.Runner, ad
 			return result, output.NewExecutionError(cr.Error, result.Hint)
 		}
 
+		mergeCommitted(committed, commit)
 		result.Committed++
 	}
 
@@ -386,7 +410,7 @@ func executePlan(p *plan.Plan, origFiles []diff.FileDiff, runner *git.Runner, ad
 }
 
 // executeCommit stages files for a single commit and creates it.
-func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDiff, runner *git.Runner) output.CommitResult {
+func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, committed map[string]map[int]bool, runner *git.Runner) output.CommitResult {
 	cr := output.CommitResult{
 		Index:   idx,
 		Message: commit.Message,
@@ -410,21 +434,19 @@ func executeCommit(idx int, commit plan.Commit, diffMap map[string]*diff.FileDif
 			fr.Strategy = "hunks"
 			fr.Hunks = f.Hunks
 
-			patchBytes, se := buildHunkPatch(runner, f, diffMap)
-			if se != nil {
+			st, ok := states[f.Path]
+			if !ok {
 				cr.Status = "failed"
-				cr.Error = se.msg
-				cr.Hint = se.hint
+				cr.Error = fmt.Sprintf("%s not found in original diff", f.Path)
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
 				return cr
 			}
 
-			// Apply patch to the real index.
-			if err := patch.Apply(runner, patchBytes); err != nil {
+			if se := stageHunkSelection(runner, f.Path, st, committed[f.Path], f.Hunks); se != nil {
 				cr.Status = "failed"
-				cr.Error = fmt.Sprintf("git apply failed for %s: %v", f.Path, err)
-				cr.Hint = "Working tree may have changed during execution. Run 'git reset HEAD --' and retry."
+				cr.Error = se.msg
+				cr.Hint = se.hint
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
 				return cr
@@ -459,10 +481,49 @@ func cleanupOrphanedIntentToAdd(runner *git.Runner, addedNFiles []string) {
 	}
 }
 
-// validateWithTempIndex copies the current git index to a temp file and
-// simulates applying all commits in order to verify that patches apply cleanly.
-func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runner) *output.ACError {
-	// Find the git directory.
+// validateWithTempIndex validates the plan without touching real git state:
+//
+//  1. For every hunk-mode file, rebuilding the FULL diff from its base must
+//     reproduce the working tree byte-for-byte. This catches captured-diff
+//     inconsistencies and working-tree drift up front, before any commit.
+//  2. Every commit is then simulated in order against a copy of the index,
+//     exercising the exact same staging calls as execution.
+func validateWithTempIndex(p *plan.Plan, states map[string]*fileState, runner *git.Runner) *output.ACError {
+	// --- (1) full-content invariant ---
+	for path, st := range states {
+		full, err := diff.Reconstruct(st.base, st.fd.Hunks)
+		if err != nil {
+			return output.NewValidationError(
+				fmt.Sprintf("captured diff is inconsistent for %s: %v", path, err),
+				"Re-run 'hc diff --json' and rebuild the plan.",
+			)
+		}
+		if st.fd.IsDeleted {
+			continue // no working-tree file to compare against
+		}
+		wtSHA, err := runner.HashWorktreeFile(path)
+		if err != nil {
+			return output.NewExecutionError(
+				fmt.Sprintf("cannot hash working tree file %s: %v", path, err),
+				"",
+			)
+		}
+		fullSHA, err := runner.RunWithStdin(full, "hash-object", "--stdin")
+		if err != nil {
+			return output.NewExecutionError(
+				fmt.Sprintf("cannot hash reconstructed content for %s: %v", path, err),
+				"",
+			)
+		}
+		if strings.TrimSpace(fullSHA) != wtSHA {
+			return output.NewValidationError(
+				fmt.Sprintf("working tree content of %s does not match the captured diff", path),
+				"The file changed while hc was running. Re-run 'hc diff --json' and rebuild the plan.",
+			)
+		}
+	}
+
+	// --- (2) sequential simulation on a temp index ---
 	gitDirOut, err := runner.Run("rev-parse", "--git-dir")
 	if err != nil {
 		return output.NewExecutionError(
@@ -516,17 +577,10 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 		Env: []string{"GIT_INDEX_FILE=" + tmpPath},
 	}
 
-	// Build a map from path to parsed file diff for quick lookup.
-	diffMap := make(map[string]*diff.FileDiff, len(parsedFiles))
-	for i := range parsedFiles {
-		diffMap[parsedFiles[i].Path] = &parsedFiles[i]
-	}
-
-	// Process each commit in order.
+	committed := make(map[string]map[int]bool)
 	for ci, c := range p.Commits {
 		for _, f := range c.Files {
 			if f.IsFullFile() {
-				// Full-file: stage the file into the temp index.
 				if err := tempRunner.Add(f.Path); err != nil {
 					return output.NewExecutionError(
 						fmt.Sprintf("validation failed at commit %d: cannot stage %s: %v", ci, f.Path, err),
@@ -536,23 +590,21 @@ func validateWithTempIndex(p *plan.Plan, parsedFiles []diff.FileDiff, runner *gi
 				continue
 			}
 
-			// Hunk-select: same pipeline as execution, but against the temp index.
-			patchData, se := buildHunkPatch(tempRunner, f, diffMap)
-			if se != nil {
+			st, ok := states[f.Path]
+			if !ok {
+				return output.NewExecutionError(
+					fmt.Sprintf("validation failed at commit %d: %s not found in original diff", ci, f.Path),
+					"",
+				)
+			}
+			if se := stageHunkSelection(tempRunner, f.Path, st, committed[f.Path], f.Hunks); se != nil {
 				return output.NewExecutionError(
 					fmt.Sprintf("validation failed at commit %d: %s", ci, se.msg),
 					se.hint,
 				)
 			}
-
-			// Apply the patch to the temp index.
-			if err := patch.Apply(tempRunner, patchData); err != nil {
-				return output.NewExecutionError(
-					fmt.Sprintf("patch validation failed for %s hunks %v: %v", f.Path, f.Hunks, err),
-					"This may indicate a diff parsing issue. Run 'hc diff' to inspect the current state.",
-				)
-			}
 		}
+		mergeCommitted(committed, c)
 	}
 
 	return nil
