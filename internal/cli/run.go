@@ -5,13 +5,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/deligoez/hc/internal/config"
 	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
 	"github.com/deligoez/hc/internal/output"
@@ -20,6 +18,7 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var dryRun bool
+	var prefix string
 
 	cmd := &cobra.Command{
 		Use:   "run [plan-file | -]",
@@ -50,7 +49,7 @@ func newRunCmd() *cobra.Command {
 				return &exitError{code: acErr.Code}
 			}
 
-			result, acErr := runPlan(planData, runner, dryRun)
+			result, acErr := runPlan(planData, runner, dryRun, prefix)
 			if acErr != nil {
 				// Execution failures carry a partial result: report which
 				// commits were created (with SHAs) so the agent can re-plan
@@ -107,12 +106,20 @@ func newRunCmd() *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate the plan without creating commits")
+	cmd.Flags().StringVar(&prefix, "prefix", "", "Prefix prepended to every commit message (idempotent), e.g. \"WB-1234: \"")
 
 	return cmd
 }
 
-// runPlan validates and (in Phase 2) executes a commit plan.
-func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACError) {
+// runPlan validates and (in Phase 2) executes a commit plan. The optional
+// prefixOpt (from --prefix) is prepended to every commit message; prefixing
+// is idempotent. Per-commit prefixes (e.g. one ticket per commit on an
+// umbrella branch) are the plan author's job: write them into the messages.
+func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...string) (any, *output.ACError) {
+	prefix := ""
+	if len(prefixOpt) > 0 {
+		prefix = prefixOpt[0]
+	}
 	// --- Step 1: Ensure we are in a git repo ---
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewValidationError(
@@ -138,22 +145,12 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		return nil, output.NewValidationError(err.Error(), "")
 	}
 
-	// --- Step 3b: Apply the configured commit message prefix (.hc.json) ---
-	var warnings []string
-	cfg, err := config.Load(runner.Dir)
-	if err != nil {
-		if acErr, ok := err.(*output.ACError); ok {
-			return nil, acErr
-		}
-		return nil, output.NewValidationError(err.Error(), "")
-	}
-	if cfg != nil && cfg.Commit.Prefix != "" {
-		warn, acErr := applyCommitPrefix(p, &cfg.Commit, runner)
-		if acErr != nil {
-			return nil, acErr
-		}
-		if warn != "" {
-			warnings = append(warnings, warn)
+	// --- Step 3b: Apply the --prefix flag to every commit message ---
+	if prefix != "" {
+		for i := range p.Commits {
+			if !strings.HasPrefix(p.Commits[i].Message, prefix) {
+				p.Commits[i].Message = prefix + p.Commits[i].Message
+			}
 		}
 	}
 
@@ -247,6 +244,7 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	}
 	parsedFiles = kept
 
+	var warnings []string
 	switch {
 	case len(skippedITA) == 0:
 	case len(skippedITA) <= 5:
@@ -328,43 +326,6 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 // left alone). "${ticket}" in the prefix resolves via ticket_from_branch
 // against the current branch name; an unresolved ticket skips prefixing and
 // returns a warning instead of failing the plan.
-func applyCommitPrefix(p *plan.Plan, cc *config.CommitConfig, runner *git.Runner) (string, *output.ACError) {
-	prefix := cc.Prefix
-
-	if strings.Contains(prefix, "${ticket}") {
-		if cc.TicketFromBranch == "" {
-			return "", output.NewValidationError(
-				".hc.json: commit.prefix uses ${ticket} but commit.ticket_from_branch is not set",
-				"Add a ticket_from_branch regular expression to .hc.json.",
-			)
-		}
-		re, err := regexp.Compile(cc.TicketFromBranch)
-		if err != nil {
-			return "", output.NewValidationError(
-				fmt.Sprintf(".hc.json: invalid ticket_from_branch pattern: %v", err),
-				"Fix the regular expression in .hc.json.",
-			)
-		}
-		branchOut, err := runner.Run("rev-parse", "--abbrev-ref", "HEAD")
-		branch := strings.TrimSpace(branchOut)
-		if err != nil || branch == "" || branch == "HEAD" {
-			return "commit prefix skipped: cannot determine the current branch", nil
-		}
-		ticket := re.FindString(branch)
-		if ticket == "" {
-			return fmt.Sprintf("commit prefix skipped: ticket pattern %q did not match branch %q", cc.TicketFromBranch, branch), nil
-		}
-		prefix = strings.ReplaceAll(prefix, "${ticket}", ticket)
-	}
-
-	for i := range p.Commits {
-		if !strings.HasPrefix(p.Commits[i].Message, prefix) {
-			p.Commits[i].Message = prefix + p.Commits[i].Message
-		}
-	}
-	return "", nil
-}
-
 // fileState holds everything needed to rebuild a hunk-mode file's staged
 // content at any point in the plan: the parsed diff and the file's base
 // content (its stage-0 index blob at capture time). Staged content for a
