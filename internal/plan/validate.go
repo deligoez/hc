@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/output"
 )
@@ -209,7 +211,10 @@ func ValidateCoverage(p *Plan, files []diff.FileDiff) error {
 
 	isAllowedUnplanned := func(path string) bool {
 		for pattern := range allowUnplanned {
-			if matched, _ := filepath.Match(pattern, path); matched {
+			// doublestar supports '**' across path separators in addition
+			// to the standard filepath.Match syntax. A trailing "dir/*"
+			// only matches one level; use "dir/**" for recursive matches.
+			if matched, _ := doublestar.Match(pattern, filepath.ToSlash(path)); matched {
 				return true
 			}
 		}

@@ -95,7 +95,7 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 ```
 
 - **`hunks`**: Indices from `hc diff` output. Omit to stage the entire file.
-- **`allow_unplanned`**: Files/globs excluded from coverage validation.
+- **`allow_unplanned`**: Files/globs excluded from coverage validation (`*` = one level, `**` = recursive).
 - Every hunk in the diff must be assigned to exactly one commit (complete coverage).
 
 ## Architecture

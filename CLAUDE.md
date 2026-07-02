@@ -56,7 +56,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 ```
 
 - `hunks` field: indices from `hc diff` output. Omit to stage entire file.
-- `allow_unplanned`: file paths/globs excluded from coverage validation.
+- `allow_unplanned`: file paths/globs excluded from coverage validation (doublestar: `*` one level, `**` recursive).
 - Every hunk in the diff must be assigned to exactly one commit.
 
 ## Structure
@@ -136,6 +136,7 @@ spec/0.1.0.md                 Full specification
 |---------|---------|
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/bluekeyes/go-gitdiff` | Diff parsing |
+| `github.com/bmatcuk/doublestar/v4` | `allow_unplanned` glob matching (`**` support) |
 | `github.com/mattn/go-isatty` | TTY detection |
 | `github.com/fatih/color` | Colored TTY output |
 | `git` (external) | All git operations via `os/exec` |
