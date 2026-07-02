@@ -20,6 +20,7 @@ type Hunk struct {
 	OldCount    int64
 	NewStart    int64
 	NewCount    int64
+	Section     string // text after the trailing @@ (enclosing function/context), if any
 	Lines       []Line
 	Fingerprint string
 }

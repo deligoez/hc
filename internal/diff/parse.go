@@ -50,6 +50,7 @@ func Parse(raw string) ([]FileDiff, error) {
 				OldCount: frag.OldLines,
 				NewStart: frag.NewPosition,
 				NewCount: frag.NewLines,
+				Section:  frag.Comment,
 			}
 
 			for _, line := range frag.Lines {
