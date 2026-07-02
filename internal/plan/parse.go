@@ -3,13 +3,14 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"strings"
 
 	"github.com/deligoez/hc/internal/output"
 )
 
-// Parse decodes JSON bytes into a Plan and validates its structure.
+// Parse decodes JSON bytes into a Plan and validates its top-level structure.
+// Per-commit and per-file validation (messages, paths, hunk indices) lives in
+// ValidateFields so each rule has exactly one implementation and one
+// spec-defined error message.
 func Parse(data []byte) (*Plan, error) {
 	var p Plan
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -35,50 +36,10 @@ func Parse(data []byte) (*Plan, error) {
 		)
 	}
 
+	// Normalize empty hunks slices to nil (full-file mode).
 	for i := range p.Commits {
-		c := &p.Commits[i]
-
-		if strings.TrimSpace(c.Message) == "" {
-			return nil, output.NewValidationError(
-				"commit has an empty message",
-				"Every commit must have a non-empty \"message\" field.",
-			)
-		}
-
-		if len(c.Files) == 0 {
-			return nil, output.NewValidationError(
-				"commit has no files",
-				"Every commit must list at least one file in the \"files\" array.",
-			)
-		}
-
-		for j := range c.Files {
-			f := &c.Files[j]
-
-			if strings.TrimSpace(f.Path) == "" {
-				return nil, output.NewValidationError(
-					"file entry has an empty path",
-					"Every file must have a non-empty \"path\" field.",
-				)
-			}
-
-			// Reject absolute paths and paths containing "..".
-			if filepath.IsAbs(f.Path) {
-				return nil, output.NewValidationError(
-					"file path must be relative: "+f.Path,
-					"Use relative paths from the repository root without \"..\" components.",
-				)
-			}
-			for _, part := range strings.Split(filepath.ToSlash(f.Path), "/") {
-				if part == ".." {
-					return nil, output.NewValidationError(
-						"file path contains \"..\" component: "+f.Path,
-						"Use relative paths from the repository root without \"..\" components.",
-					)
-				}
-			}
-
-			// Normalize empty hunks slice to nil (full-file mode).
+		for j := range p.Commits[i].Files {
+			f := &p.Commits[i].Files[j]
 			if f.Hunks != nil && len(f.Hunks) == 0 {
 				f.Hunks = nil
 			}

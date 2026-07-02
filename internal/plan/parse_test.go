@@ -130,9 +130,15 @@ func TestParse_MissingFilePath(t *testing.T) {
 		]
 	}`)
 
-	_, err := Parse(data)
+	// Structural parse succeeds; the empty path is caught by ValidateFields,
+	// which owns all per-file validation (single spec-defined message).
+	p, err := Parse(data)
+	if err != nil {
+		t.Fatalf("Parse should not fail on empty path: %v", err)
+	}
+	err = ValidateFields(p)
 	if err == nil {
-		t.Fatal("expected error for missing file path")
+		t.Fatal("expected ValidateFields error for missing file path")
 	}
 	assertHasHint(t, err)
 }
