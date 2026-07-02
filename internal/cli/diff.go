@@ -21,6 +21,10 @@ type diffFileJSON struct {
 	OldPath     string         `json:"old_path,omitempty"`
 	IsBinary    bool           `json:"is_binary,omitempty"`
 	IsUntracked bool           `json:"is_untracked,omitempty"`
+	// IsIntentToAdd marks files that appear in the diff only because of a
+	// git add -N index entry. hc run skips them from coverage validation
+	// unless the plan references them.
+	IsIntentToAdd bool `json:"is_intent_to_add,omitempty"`
 }
 
 // diffHunkJSON is the JSON representation of a hunk.
@@ -264,6 +268,9 @@ func printDiffJSON(result *diffResult) error {
 			OldPath:     f.OldPath,
 			IsBinary:    f.IsBinary,
 			IsUntracked: f.IsUntracked,
+			// In the unstaged diff, a tracked-new file can only appear via
+			// an intent-to-add index entry.
+			IsIntentToAdd: f.IsNew && !f.IsUntracked,
 		}
 
 		for _, h := range f.Hunks {
