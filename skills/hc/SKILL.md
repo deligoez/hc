@@ -5,7 +5,7 @@ description: Hunk-based atomic git commits for AI agents. Splits large diffs int
 
 # hc -- Hunk Commits Skill
 
-Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hunks, hc handles all git mechanics (re-indexing, patch construction, staging, committing). Works from any subdirectory of the repo; paths are always repo-root-relative.
+Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hunks, hc handles all git mechanics (staging, committing, and -- for existing commits -- conflict-free history splitting). Works from any subdirectory of the repo; paths are always repo-root-relative.
 
 ## Activation
 
@@ -13,6 +13,7 @@ This skill activates when:
 - The agent needs to create atomic commits from uncommitted changes
 - The user asks for hunk-level commit granularity
 - The agent has written multiple logical changes (e.g., several tests, feature + test, refactor + fix)
+- The user asks to split, break up, or re-granularize EXISTING commits (use `hc log` + `hc rewrite`)
 
 ## Workflow
 
@@ -180,6 +181,35 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 }
 ```
 
+## Splitting Existing Commits (`hc log` + `hc rewrite`)
+
+Already-made commits that are too coarse (pre-hc history, or over-grouped runs) can be split retroactively. Same two-step shape as diff/run:
+
+```bash
+# Step 1: read the range (oldest first; per-commit indexed hunks WITH content)
+hc log <base>..HEAD --json
+
+# Step 2: write a rewrite plan and execute via heredoc
+hc rewrite - <<'PLAN'
+{"rewrites": [
+  {"commit": "a1b2c3d4e5f6", "commits": [
+    {"message": "test: fork StoreOrderAction test", "files": [{"path": "tests/StoreOrderActionTest.php"}]},
+    {"message": "test: fork StorePaymentAction test", "files": [{"path": "tests/StorePaymentActionTest.php"}]}
+  ]}
+]}
+PLAN
+```
+
+Rules:
+
+1. **`commit`** is a SHA (12-char prefix from `hc log` is fine). Commits NOT listed in `rewrites` are kept as they are -- their SHAs still change because ancestry changes, but message/author/date/content stay identical.
+2. **Coverage applies per commit:** the replacement commits together must cover EVERY hunk of the original commit exactly once (same guarantee as `hc run`; no `allow_unplanned` here). Hunk indices come from that commit's entry in `hc log`.
+3. **Granularity rules apply unchanged:** default one file per replacement commit; split a file's hunks further when they carry separable ideas; keep mechanical sweeps together.
+4. **Conflict-free by construction:** each split must reproduce the original commit's tree byte-for-byte (hc verifies this), so downstream commits re-parent cleanly -- no rebase conflicts, and the working tree is never touched (uncommitted changes are safe).
+5. **Safety rails:** the old head is saved at `refs/hc/backup/<branch>` (restore with `git reset --hard <backup-ref>`); commits already on a remote are refused unless `--force` (a force-push will be needed); merge commits and the root commit cannot be split; requires a checked-out branch (no detached HEAD).
+6. **`--dry-run`** builds and validates the whole new history (including the tree invariant) without moving the branch.
+7. Exit codes match `hc run`: 2 = plan problem, nothing changed; the branch only ever moves in one final atomic step.
+
 ## Error Recovery
 
 Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you the recovery path:
@@ -205,6 +235,9 @@ Common validation errors:
 | `hc run plan.json` | Execute plan from file |
 | `hc run --prefix "WB-1234: " -` | Prepend a uniform prefix to every commit message |
 | `hc run --dry-run -` | Validate only (rarely needed; `run` validates first anyway) |
+| `hc log <base>..HEAD --json` | Per-commit indexed hunks for existing commits (input for rewrite) |
+| `hc rewrite - <<'PLAN' ... PLAN` | Split existing commits; conflict-free, backup ref kept |
+| `hc rewrite --dry-run -` | Validate a rewrite without moving the branch |
 | `hc --version` | Show version |
 
 ## Installation
