@@ -82,18 +82,10 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | `commits[].files[].hunks` | int[] | Hunk indices from `hc diff`. Omit to stage the whole file. |
 | `allow_unplanned` | string[] | Globs excluded from coverage validation (`*` = one level, `**` = recursive) |
 
-## Repo Config (`.hc.json`)
+## Ticket / Prefix Conventions
 
-An optional `.hc.json` at the repo root configures commit message prefixing -- check for it before writing messages:
-
-```json
-{"commit": {"prefix": "${ticket}: ", "ticket_from_branch": "[A-Z]+-\\d+"}}
-```
-
-- `commit.prefix` is prepended to EVERY commit message by hc itself. `${ticket}` resolves via the `ticket_from_branch` regex against the current branch name (`feature/WB-1234-login` -> `WB-1234: feat(auth): add login`). A static prefix (no `${ticket}`) is prepended as-is.
-- **Write plain conventional messages and let hc add the prefix.** Prefixing is idempotent (already-prefixed messages are left alone), but do not duplicate the work.
-- If the ticket pattern does not match the branch, hc skips prefixing and reports it in `warnings` -- it never fails the plan for this.
-- A malformed `.hc.json` is a validation error (exit 2); fix or remove the file.
+- **Same ticket for the whole run:** pass it once -- `hc run --prefix "WB-1234: " -` prepends it to every commit message (idempotent: already-prefixed messages are left alone). Write plain conventional messages and let the flag do the rest.
+- **Different tickets per commit** (umbrella branch, many issues in one run): write the ticket directly into each commit message -- `"message": "WB-2940: feat(auth): add login"`. Per-commit prefixes are the plan author's job; hc keeps messages otherwise opaque.
 
 ## Anti-patterns -- do NOT do these
 
@@ -196,6 +188,7 @@ Common validation errors:
 | `hc diff` | Same, compact TTY view (no content) |
 | `hc run - <<'PLAN' ... PLAN` | Execute plan from stdin (preferred) |
 | `hc run plan.json` | Execute plan from file |
+| `hc run --prefix "WB-1234: " -` | Prepend a uniform prefix to every commit message |
 | `hc run --dry-run -` | Validate only (rarely needed; `run` validates first anyway) |
 | `hc --version` | Show version |
 

@@ -114,7 +114,7 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 ```
 
 - **`hunks`**: Indices from `hc diff` output. Omit to stage the entire file.
-- **`.hc.json`** (optional, repo root): `{"commit": {"prefix": "${ticket}: ", "ticket_from_branch": "[A-Z]+-\\d+"}}` prepends a (branch-derived) prefix to every commit message -- e.g. `WB-1234: feat(auth): add login`. Idempotent; unresolved tickets skip with a warning.
+- **`--prefix`**: `hc run --prefix "WB-1234: " <plan>` prepends the string to every commit message (idempotent). For per-commit tickets, write them into the messages.
 - **`allow_unplanned`**: Files/globs excluded from coverage validation (`*` = one level, `**` = recursive).
 - Every hunk in the diff must be assigned to exactly one commit (complete coverage).
 - Renamed/moved files appear as two entries -- a deletion (old path) and a new file -- and both must be planned; git reconstructs the rename in history automatically.
