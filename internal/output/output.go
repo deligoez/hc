@@ -58,6 +58,29 @@ type DryRunIssue struct {
 	Hint    string `json:"hint,omitempty"`
 }
 
+// RewriteResult is the top-level output for hc rewrite.
+type RewriteResult struct {
+	Branch       string           `json:"branch"`
+	OldHead      string           `json:"old_head"`
+	NewHead      string           `json:"new_head"`
+	BackupRef    string           `json:"backup_ref,omitempty"`
+	TotalCommits int              `json:"total_commits"`
+	Rewrites     []RewriteMapping `json:"rewrites"`
+	DryRun       bool             `json:"dry_run,omitempty"`
+}
+
+// RewriteMapping maps one original commit to its replacements.
+type RewriteMapping struct {
+	Commit       string           `json:"commit"`
+	Replacements []RewrittenEntry `json:"replacements"`
+}
+
+// RewrittenEntry is one replacement commit.
+type RewrittenEntry struct {
+	SHA     string `json:"sha"`
+	Message string `json:"message"`
+}
+
 // ACError is a structured error with an exit code and hint.
 type ACError struct {
 	Message string `json:"error"`
