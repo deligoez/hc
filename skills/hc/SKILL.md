@@ -5,7 +5,7 @@ description: Hunk-based atomic git commits for AI agents. Splits large diffs int
 
 # hc -- Hunk Commits Skill
 
-Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hunks, hc handles all git mechanics (re-indexing, patch construction, staging, committing).
+Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hunks, hc handles all git mechanics (re-indexing, patch construction, staging, committing). Works from any subdirectory of the repo; paths are always repo-root-relative.
 
 ## Activation
 
@@ -31,6 +31,28 @@ PLAN
 ```
 
 `hc run` is atomic at the plan level: the whole plan is validated (including a simulated apply of every commit) before the first real commit is created. A validation failure means nothing changed -- fix the plan and retry. `--dry-run` exists but is rarely needed; `hc run` performs the same validation anyway.
+
+## Reading the diff
+
+Each hunk in `hc diff --json` carries what you need to classify it -- never guess from headers alone:
+
+- `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines.
+- `section` -- the enclosing function/context from git (which function does this hunk touch?).
+- `index` -- what you reference in the plan.
+- Top-level `warnings` -- non-fatal issues (e.g. pre-staged changes that `hc run` will reject). Always check it.
+
+**File states and what to plan:**
+
+| Diff entry looks like | State | Plan entry |
+|---|---|---|
+| `hunks: [...]` | Modified file | `{"path": ..., "hunks": [...]}` or omit `hunks` for whole file |
+| `is_untracked: true`, `hunks: []` | New file | Full-file only (no indices exist yet): `{"path": ...}` |
+| `is_deleted: true` | Deleted file | `{"path": ...}` (full-file stages the deletion) |
+| `is_binary: true` | Binary file | Full-file only; `hunks` is a validation error |
+| `hunks: []`, no flags | Mode-only change (e.g. chmod +x) | Full-file: `{"path": ...}` |
+| Old path deleted + new path untracked | Rename/move | TWO entries: `{"path": "old"}` and `{"path": "new"}` (may share a commit); git shows it as a rename in history automatically |
+
+**Hunk boundaries are git's:** `-U0` merges edits on adjacent lines into ONE hunk, and hc cannot split inside a hunk. If two logical changes ended up in the same hunk, either commit them together or make the edits in separate passes next time.
 
 ## Plan Format
 
@@ -68,6 +90,7 @@ Agents systematically err toward commits that are TOO BIG. Default to splitting.
 - **Different subsystems = different commits**, even for the same kind of change.
 - **The litmus test:** could `git revert` of this commit undo exactly one decision? If it would drag unrelated changes along, split.
 - Combine only when hunks are mutually dependent -- code + the type it requires, a call site + the signature change it follows.
+- **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
 
 ## Commit Ordering
 
@@ -80,16 +103,12 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 
 ## Plan Writing Rules
 
-1. **Run `hc diff --json` once, immediately before planning.** Read each hunk's `content` and `section` to classify it. Never guess from headers alone.
+1. **Run `hc diff --json` once, immediately before planning.** Classify each hunk from its `content` and `section`.
 2. **Assign EVERY hunk to exactly one commit.** Complete coverage is validated; unassigned hunks are a hard error.
 3. **Use original indices everywhere.** Even in later commits, reference hunks by their position in that one `hc diff` output -- hc re-matches them by content fingerprint after earlier commits shift line numbers.
-4. **Untracked files (`"is_untracked": true`) must omit `hunks`.** They have no hunk indices yet; full-file mode is the only option for them.
-5. **Full-file mode for simple cases.** If an entire file belongs in one commit, omit `hunks`.
-6. **Binary files must omit `hunks`.**
-7. **Renamed/moved files appear as TWO entries** -- a deletion at the old path and an untracked file at the new path. Plan both (`{"path": "old.go"}` and `{"path": "new.go"}`); git shows them as a rename in history automatically.
-8. **Conventional commit messages** following the project's convention.
-9. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
-10. **Check `warnings`** in the JSON output -- e.g. pre-staged changes that `hc run` will reject.
+4. **Match the plan entry to the file state** (see the table above): untracked/binary/mode-only/deleted are full-file; renames need both paths.
+5. **Conventional commit messages** following the project's convention.
+6. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
 
 ## Common Patterns
 
@@ -144,7 +163,7 @@ Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you
 
 Common validation errors:
 - `staging area is not clean` -- something is pre-staged. Run `git reset HEAD`, then retry.
-- `hunks [...] not assigned to any commit` -- add the listed hunks to a commit or use `allow_unplanned`.
+- `hunks [...] not assigned to any commit` / `has changes but is not in the plan` -- add the listed hunks/file to a commit or use `allow_unplanned`.
 - `hunk index N out of range` -- the diff changed since you read it. Re-run `hc diff --json` and re-plan.
 - `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is left intact: fix the issue, run `git commit -m "<message>"` manually, then re-plan the rest.
 
