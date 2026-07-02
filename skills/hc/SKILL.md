@@ -39,6 +39,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines.
 - `section` -- the enclosing function/context from git (which function does this hunk touch?).
 - `index` -- what you reference in the plan.
+- Top-level `untracked` -- plain untracked paths (compact string array). They carry no hunks and never enter coverage validation; plan a path only to commit that new file.
 - Top-level `warnings` -- non-fatal issues (e.g. pre-staged changes that `hc run` will reject). Always check it.
 
 **File states and what to plan:**
@@ -46,7 +47,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | Diff entry looks like | State | Plan entry |
 |---|---|---|
 | `hunks: [...]` | Modified file | `{"path": ..., "hunks": [...]}` or omit `hunks` for whole file |
-| `is_untracked: true`, `hunks: []` | New file | Full-file only (no indices exist yet): `{"path": ...}` |
+| Path in top-level `untracked` array | New file | Only if it should be committed: full-file `{"path": ...}` (no hunk indices exist). Otherwise ignore -- untracked files never enter coverage validation |
 | `is_deleted: true` | Deleted file | `{"path": ...}` (full-file stages the deletion) |
 | `is_binary: true` | Binary file | Full-file only; `hunks` is a validation error |
 | `hunks: []`, no flags | Mode-only change (e.g. chmod +x) | Full-file: `{"path": ...}` |
