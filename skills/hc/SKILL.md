@@ -51,6 +51,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | `is_binary: true` | Binary file | Full-file only; `hunks` is a validation error |
 | `hunks: []`, no flags | Mode-only change (e.g. chmod +x) | Full-file: `{"path": ...}` |
 | Old path deleted + new path untracked | Rename/move | TWO entries: `{"path": "old"}` and `{"path": "new"}` (may share a commit); git shows it as a rename in history automatically |
+| `is_intent_to_add: true` (new file WITH hunks) | Stale `git add -N` from another tool | Nothing -- hc skips it from coverage and warns; plan its path only if you want it committed |
 
 **Hunk boundaries are git's:** `-U0` merges edits on adjacent lines into ONE hunk, and hc cannot split inside a hunk. If two logical changes ended up in the same hunk, either commit them together or make the edits in separate passes next time.
 
@@ -108,7 +109,7 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 3. **Use original indices everywhere.** Even in later commits, reference hunks by their position in that one `hc diff` output -- hc rebuilds staged content from those original coordinates, so line-number shifts from earlier commits never matter.
 4. **Match the plan entry to the file state** (see the table above): untracked/binary/mode-only/deleted are full-file; renames need both paths.
 5. **Conventional commit messages** following the project's convention.
-6. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
+6. **Use `allow_unplanned` sparingly** -- only for TRACKED files with WIP changes that must stay uncommitted. Untracked and intent-to-add files never need it: they are only committed when you explicitly plan their path. `*` matches one path level; use `dir/**` for recursive.
 
 ## Common Patterns
 
