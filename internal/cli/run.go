@@ -76,6 +76,9 @@ func newRunCmd() *cobra.Command {
 				if printer.UseJSON() {
 					printer.PrintJSON(dr)
 				} else {
+					for _, w := range dr.Warnings {
+						fmt.Fprintln(printer.ErrOut, "warning:", w)
+					}
 					printer.Info("Dry run: %d commits, %d files, %d hunks", dr.Commits, dr.Files, dr.HunksTotal)
 					printer.Info("Coverage: %d/%d hunks assigned, 0 unplanned files", dr.HunksAssigned, dr.HunksTotal)
 					printer.Info("Plan valid: %d commits would be created", dr.Commits)
@@ -85,6 +88,9 @@ func newRunCmd() *cobra.Command {
 				if printer.UseJSON() {
 					printer.PrintJSON(r)
 				} else {
+					for _, w := range r.Warnings {
+						fmt.Fprintln(printer.ErrOut, "warning:", w)
+					}
 					for _, cr := range r.Commits {
 						if cr.Status == "committed" {
 							printer.Info("[%d] %s %s", cr.Index, cr.SHA, cr.Message)
@@ -197,6 +203,37 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 		)
 	}
 
+	// --- Step 6c: Exempt unplanned intent-to-add files from coverage ---
+	// With a clean staging area, an IsNew entry in the UNSTAGED diff can only
+	// come from an intent-to-add index entry. hc itself only runs git add -N
+	// on paths referenced by the plan (Step 4), so an unplanned IsNew entry
+	// is a stale or foreign `git add -N` (crashed tool, editor plugin, ...).
+	// hc can never stage such a file -- staging is always driven by the plan
+	// -- so requiring it in the plan (or in allow_unplanned) adds noise
+	// without adding safety. Skip it from coverage and surface a warning.
+	planned := make(map[string]bool)
+	for _, path := range collectPlanFilePaths(p) {
+		planned[path] = true
+	}
+	var warnings []string
+	kept := make([]diff.FileDiff, 0, len(parsedFiles))
+	for _, fd := range parsedFiles {
+		if fd.IsNew && !planned[fd.Path] {
+			warnings = append(warnings, fmt.Sprintf(
+				"skipped unplanned intent-to-add file %s (never staged by hc; add it to a commit to include it)", fd.Path))
+			continue
+		}
+		kept = append(kept, fd)
+	}
+	parsedFiles = kept
+	if len(parsedFiles) == 0 {
+		revertIntent()
+		return nil, output.NewValidationError(
+			"no uncommitted changes",
+			"There is nothing to commit.",
+		)
+	}
+
 	// --- Step 7: Compute fingerprints ---
 	for i := range parsedFiles {
 		for j := range parsedFiles[i].Hunks {
@@ -230,11 +267,15 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool) (any, *output.ACE
 	if dryRun {
 		revertIntent()
 		result := buildDryRunResult(p, parsedFiles)
+		result.Warnings = warnings
 		return result, nil
 	}
 
 	// --- Phase 2: Execute the plan ---
 	result, acErr := executePlan(p, states, runner, intentAdded)
+	if result != nil {
+		result.Warnings = warnings
+	}
 	if acErr != nil {
 		return result, acErr
 	}

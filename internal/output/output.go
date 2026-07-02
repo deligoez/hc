@@ -15,6 +15,7 @@ type Result struct {
 	Committed int            `json:"committed"`
 	Total     int            `json:"total"`
 	Commits   []CommitResult `json:"commits"`
+	Warnings  []string       `json:"warnings,omitempty"`
 	Error     string         `json:"error,omitempty"`
 	Code      int            `json:"code,omitempty"`
 	Hint      string         `json:"hint,omitempty"`
@@ -45,6 +46,7 @@ type DryRunResult struct {
 	Files         int           `json:"files"`
 	HunksTotal    int           `json:"hunks_total"`
 	HunksAssigned int           `json:"hunks_assigned"`
+	Warnings      []string      `json:"warnings,omitempty"`
 	Issues        []DryRunIssue `json:"issues"`
 }
 
