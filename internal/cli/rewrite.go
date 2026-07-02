@@ -17,6 +17,8 @@ import (
 func newRewriteCmd() *cobra.Command {
 	var dryRun bool
 	var force bool
+	var summaryOnly bool
+	var protect []string
 
 	cmd := &cobra.Command{
 		Use:   "rewrite [plan-file | -]",
@@ -49,7 +51,7 @@ func newRewriteCmd() *cobra.Command {
 				return &exitError{code: acErr.Code}
 			}
 
-			result, acErr := runRewrite(planData, runner, dryRun, force)
+			result, acErr := runRewrite(planData, runner, rewriteOpts{dryRun: dryRun, force: force, summaryOnly: summaryOnly, protect: protect})
 			if acErr != nil {
 				printer.PrintError(acErr)
 				return &exitError{code: acErr.Code}
@@ -64,12 +66,13 @@ func newRewriteCmd() *cobra.Command {
 					printer.Info("  %s %s", shortSHA(r.SHA), r.Message)
 				}
 			}
+			s := result.Summary
 			if result.DryRun {
-				printer.Info("dry run: %s would move %s -> %s (%d commits rebuilt)",
-					result.Branch, shortSHA(result.OldHead), shortSHA(result.NewHead), result.TotalCommits)
+				printer.Info("dry run: %s would move %s -> %s (split %d -> %d, kept %d, range total %d)",
+					result.Branch, shortSHA(result.OldHead), shortSHA(result.NewHead), s.Split, s.Replacements, s.Kept, s.TotalAfter)
 			} else {
-				printer.Info("%s: %s -> %s (%d commits rebuilt, backup at %s)",
-					result.Branch, shortSHA(result.OldHead), shortSHA(result.NewHead), result.TotalCommits, result.BackupRef)
+				printer.Info("%s: %s -> %s (split %d -> %d, kept %d, range total %d, backup at %s)",
+					result.Branch, shortSHA(result.OldHead), shortSHA(result.NewHead), s.Split, s.Replacements, s.Kept, s.TotalAfter, result.BackupRef)
 			}
 			return nil
 		},
@@ -77,15 +80,26 @@ func newRewriteCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build and validate everything without moving the branch")
 	cmd.Flags().BoolVar(&force, "force", false, "Allow rewriting commits that exist on a remote (requires force-push afterwards)")
+	cmd.Flags().BoolVar(&summaryOnly, "summary", false, "Omit per-rewrite replacement lists from the result (counts only)")
+	cmd.Flags().StringArrayVar(&protect, "protect", nil, "Refuse to split commits reachable from this ref (repeatable), e.g. origin/develop")
 
 	return cmd
+}
+
+// rewriteOpts carries hc rewrite's flags.
+type rewriteOpts struct {
+	dryRun      bool
+	force       bool
+	summaryOnly bool
+	protect     []string
 }
 
 // runRewrite validates the plan and rebuilds the current branch. Nothing is
 // externally visible until the single final ref update: all intermediate
 // objects are written unreferenced, so any validation failure leaves the
 // repository untouched (exit 2).
-func runRewrite(planData []byte, runner *git.Runner, dryRun, force bool) (*output.RewriteResult, *output.ACError) {
+func runRewrite(planData []byte, runner *git.Runner, opts rewriteOpts) (*output.RewriteResult, *output.ACError) {
+	dryRun, force := opts.dryRun, opts.force
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewValidationError(
 			"not a git repository",
@@ -136,6 +150,30 @@ func runRewrite(planData []byte, runner *git.Runner, dryRun, force bool) (*outpu
 		targets[full] = &rp.Rewrites[i]
 	}
 
+	// Refuse to split commits that belong to protected history.
+	for _, ref := range opts.protect {
+		refSHA, err := runner.ResolveSHA(ref)
+		if err != nil {
+			return nil, output.NewValidationError(
+				fmt.Sprintf("cannot resolve --protect ref %q", ref),
+				"Use a branch, tag or SHA, e.g. --protect origin/develop.",
+			)
+		}
+		for sha := range targets {
+			protected, err := runner.IsAncestor(sha, refSHA)
+			if err != nil {
+				return nil, output.NewExecutionError(
+					fmt.Sprintf("cannot check ancestry of %s against %s: %v", shortSHA(sha), ref, err), "")
+			}
+			if protected {
+				return nil, output.NewValidationError(
+					fmt.Sprintf("commit %s is protected: it is reachable from %s", shortSHA(sha), ref),
+					"Remove it from the plan; --protect guards other people's history.",
+				)
+			}
+		}
+	}
+
 	// Locate targets on the branch's first-parent chain (newest first).
 	chain, err := runner.FirstParentChain(headSHA, 0)
 	if err != nil {
@@ -172,16 +210,17 @@ func runRewrite(planData []byte, runner *git.Runner, dryRun, force bool) (*outpu
 		if err != nil {
 			return nil, output.NewExecutionError(fmt.Sprintf("cannot read commit %s: %v", sha, err), "")
 		}
+		_, targeted := targets[sha]
 		if len(ci.Parents) == 0 {
 			return nil, output.NewValidationError(
 				fmt.Sprintf("cannot rewrite the root commit %s", shortSHA(sha)),
 				"Rewrite a range that starts after the root commit.",
 			)
 		}
-		if len(ci.Parents) > 1 {
+		if targeted && len(ci.Parents) > 1 {
 			return nil, output.NewValidationError(
-				fmt.Sprintf("commit %s is a merge; hc rewrite requires a linear history in the rewritten range", shortSHA(sha)),
-				"Split only commits below the merge, or flatten the history first.",
+				fmt.Sprintf("commit %s is a merge and cannot be split", shortSHA(sha)),
+				"Merges are preserved when untouched; remove this entry from the plan.",
 			)
 		}
 		infos[i] = ci
@@ -221,13 +260,17 @@ func runRewrite(planData []byte, runner *git.Runner, dryRun, force bool) (*outpu
 	for i, orig := range infos {
 		rw, isSplit := targets[orig.SHA]
 		if !isSplit {
-			// Untouched commit: same tree, new parent, same author/message.
-			newSHA, err := runner.CommitTree(orig.Tree, newParent, orig.Message, orig)
+			// Untouched commit: same tree, new first parent, same
+			// author/message. A merge keeps its extra parents verbatim, so
+			// mid-range merges are preserved rather than rejected.
+			parents := append([]string{newParent}, orig.Parents[1:]...)
+			newSHA, err := runner.CommitTree(orig.Tree, parents, orig.Message, orig)
 			if err != nil {
 				return nil, output.NewExecutionError(
 					fmt.Sprintf("cannot re-parent commit %s: %v", shortSHA(orig.SHA), err), "")
 			}
 			newParent = newSHA
+			result.Summary.Kept++
 			continue
 		}
 
@@ -241,11 +284,17 @@ func runRewrite(planData []byte, runner *git.Runner, dryRun, force bool) (*outpu
 			newParent = r.SHA
 		}
 		result.Rewrites = append(result.Rewrites, mapping)
+		result.Summary.Split++
+		result.Summary.Replacements += len(mapping.Replacements)
 		_ = i
 	}
 
 	result.NewHead = shortSHA(newParent)
-	result.TotalCommits = len(rebuild)
+	result.Summary.TotalAfter = result.Summary.Kept + result.Summary.Replacements
+	result.TreeIdentical = true // enforced per split; untouched commits reuse trees
+	if opts.summaryOnly {
+		result.Rewrites = nil
+	}
 
 	if dryRun {
 		return result, nil
@@ -370,7 +419,7 @@ func buildSplit(runner, tempRunner *git.Runner, orig *git.CommitInfo, rw *plan.R
 		if err != nil {
 			return nil, output.NewExecutionError(wrap(fmt.Sprintf("cannot write tree: %v", err)), "")
 		}
-		newSHA, err := runner.CommitTree(tree, prev, c.Message, orig)
+		newSHA, err := runner.CommitTree(tree, []string{prev}, c.Message, orig)
 		if err != nil {
 			return nil, output.NewExecutionError(wrap(fmt.Sprintf("cannot create commit %d: %v", ci, err)), "")
 		}
