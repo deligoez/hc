@@ -5,7 +5,7 @@ description: Hunk-based atomic git commits for AI agents. Splits large diffs int
 
 # hc -- Hunk Commits Skill
 
-Hunk-based atomic commits for AI agents. One JSON plan, N commits. Agent assigns hunks, tool handles everything else.
+Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hunks, hc handles all git mechanics (re-indexing, patch construction, staging, committing).
 
 ## Activation
 
@@ -16,24 +16,21 @@ This skill activates when:
 
 ## Workflow
 
-```
-# Step 1: See what changed (indexed hunks)
+```bash
+# Step 1: See what changed. ONE call gives you everything:
+# indices, headers, enclosing function (section), and the changed lines (content).
+# Do NOT run 'git diff' separately -- hc diff --json already includes hunk content.
 hc diff --json
 
-# Step 2: Write a commit plan
-# Map hunks to commits based on logical grouping.
-# Use the ORIGINAL diff's hunk indices -- hc handles re-indexing.
-# IMPORTANT: Every hunk must be assigned to exactly one commit.
-
-# Step 3: Execute
-echo '<plan-json>' | hc run -
-
-# Or with a file:
-hc run plan.json
-
-# Optional: validate first
-echo '<plan-json>' | hc run --dry-run -
+# Step 2: Write the plan (see rules below), then execute via heredoc.
+# ALWAYS use a quoted heredoc, never echo '<json>' -- commit messages
+# containing quotes break shell quoting.
+hc run - <<'PLAN'
+{"commits":[{"message":"feat(auth): add login","files":[{"path":"auth.go","hunks":[0,1]}]}]}
+PLAN
 ```
+
+`hc run` is atomic at the plan level: the whole plan is validated (including a simulated apply of every commit) before the first real commit is created. A validation failure means nothing changed -- fix the plan and retry. `--dry-run` exists but is rarely needed; `hc run` performs the same validation anyway.
 
 ## Plan Format
 
@@ -48,7 +45,7 @@ echo '<plan-json>' | hc run --dry-run -
       ]
     }
   ],
-  "allow_unplanned": ["wip_file.go"]
+  "allow_unplanned": ["experiments/**"]
 }
 ```
 
@@ -58,22 +55,44 @@ echo '<plan-json>' | hc run --dry-run -
 | `commits[].message` | string | Non-empty commit message |
 | `commits[].files` | array | Files in this commit (at least one) |
 | `commits[].files[].path` | string | Relative path from repo root |
-| `commits[].files[].hunks` | int[] | Hunk indices from `hc diff`. Omit for full-file staging. |
-| `allow_unplanned` | string[] | Paths/globs excluded from coverage validation |
+| `commits[].files[].hunks` | int[] | Hunk indices from `hc diff`. Omit to stage the whole file. |
+| `allow_unplanned` | string[] | Globs excluded from coverage validation (`*` = one level, `**` = recursive) |
+
+## Commit Granularity -- the most important rule
+
+Agents systematically err toward commits that are TOO BIG. Default to splitting.
+
+- **One reviewable idea per commit.** If you would need "and" in the commit message, split it: `feat(auth): add login endpoint and fix token expiry` is two commits.
+- **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit unless inseparable (a rename that the feature requires, for example).
+- **Same file is NOT a reason to combine.** Five new tests in one file = five commits (one hunk each). Use the `section` field to see which function each hunk touches.
+- **Different subsystems = different commits**, even for the same kind of change.
+- **The litmus test:** could `git revert` of this commit undo exactly one decision? If it would drag unrelated changes along, split.
+- Combine only when hunks are mutually dependent -- code + the type it requires, a call site + the signature change it follows.
+
+## Commit Ordering
+
+Order commits so the history builds cleanly:
+1. Infrastructure / types / helpers with no dependencies first
+2. Code that uses them second
+3. Tests last (or paired with their feature if the project convention is feature+test)
+
+Goal: each commit should compile and pass tests on its own. hc creates commits strictly in plan order.
 
 ## Plan Writing Rules
 
-1. **Run `hc diff --json` once.** Use the indexed output to see all files and hunk indices.
-2. **Assign EVERY hunk to exactly one commit.** Complete coverage is required. No hunk can be left unassigned.
-3. **Use original indices.** Always reference hunks by their position in the `hc diff` output, even for later commits. hc handles re-indexing internally.
-4. **Full-file for simple cases.** If an entire file belongs in one commit, omit `hunks`.
-5. **Group by logical change.** Same type + same specific problem + direct dependency = same commit.
-6. **Conventional commit messages.** Use the project's commit convention.
-7. **Use `allow_unplanned` sparingly.** Only for files with WIP changes that should not be committed yet.
+1. **Run `hc diff --json` once, immediately before planning.** Read each hunk's `content` and `section` to classify it. Never guess from headers alone.
+2. **Assign EVERY hunk to exactly one commit.** Complete coverage is validated; unassigned hunks are a hard error.
+3. **Use original indices everywhere.** Even in later commits, reference hunks by their position in that one `hc diff` output -- hc re-matches them by content fingerprint after earlier commits shift line numbers.
+4. **Untracked files (`"is_untracked": true`) must omit `hunks`.** They have no hunk indices yet; full-file mode is the only option for them.
+5. **Full-file mode for simple cases.** If an entire file belongs in one commit, omit `hunks`.
+6. **Binary files must omit `hunks`.**
+7. **Conventional commit messages** following the project's convention.
+8. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.
+9. **Check `warnings`** in the JSON output -- e.g. pre-staged changes that `hc run` will reject.
 
 ## Common Patterns
 
-**One test per commit (5 tests in one file):**
+**One test per commit (tests in one file, classified via `section`):**
 ```json
 {
   "commits": [
@@ -103,7 +122,7 @@ echo '<plan-json>' | hc run --dry-run -
 **Partial commit with WIP excluded:**
 ```json
 {
-  "allow_unplanned": ["experiments/*"],
+  "allow_unplanned": ["experiments/**"],
   "commits": [
     {
       "message": "fix(db): close connections on timeout",
@@ -115,22 +134,28 @@ echo '<plan-json>' | hc run --dry-run -
 
 ## Error Recovery
 
-Errors only happen during validation (before any commits):
-1. Read the `error` and `hint` fields from JSON output
-2. Fix the plan (adjust hunk indices, add missing files, etc.)
-3. Retry: `echo '<fixed-plan>' | hc run -`
+Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you the recovery path:
 
-No commits created, no git state changed. Simple retry.
+| Exit | Meaning | Recovery |
+|------|---------|----------|
+| 2 | Validation error. **No git state changed.** | Fix the plan per the `hint`, retry the same `hc run`. |
+| 3 | Execution error mid-plan. Some commits may exist. | Read `hint`: "Commits 0-N are done" means those are committed. Run `hc diff --json` again and write a NEW plan for the remaining changes only. |
+
+Common validation errors:
+- `staging area is not clean` -- something is pre-staged. Run `git reset HEAD`, then retry.
+- `hunks [...] not assigned to any commit` -- add the listed hunks to a commit or use `allow_unplanned`.
+- `hunk index N out of range` -- the diff changed since you read it. Re-run `hc diff --json` and re-plan.
+- `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is left intact: fix the issue, run `git commit -m "<message>"` manually, then re-plan the rest.
 
 ## Key Commands
 
 | Command | Purpose |
 |---------|---------|
-| `hc diff` | Show all files and hunks with indices |
-| `hc diff --json` | Same, as structured JSON (preferred) |
-| `echo '<json>' \| hc run -` | Execute plan from stdin |
+| `hc diff --json` | Indexed hunks WITH content and section -- everything needed to plan |
+| `hc diff` | Same, compact TTY view (no content) |
+| `hc run - <<'PLAN' ... PLAN` | Execute plan from stdin (preferred) |
 | `hc run plan.json` | Execute plan from file |
-| `hc run --dry-run -` | Validate plan without committing |
+| `hc run --dry-run -` | Validate only (rarely needed; `run` validates first anyway) |
 | `hc --version` | Show version |
 
 ## Installation
