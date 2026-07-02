@@ -183,32 +183,49 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 
 ## Splitting Existing Commits (`hc log` + `hc rewrite`)
 
-Already-made commits that are too coarse (pre-hc history, or over-grouped runs) can be split retroactively. Same two-step shape as diff/run:
+Already-made commits that are too coarse (pre-hc history, or over-grouped runs) can be split retroactively.
+
+**Fast path -- file-level splitting (the common case):**
 
 ```bash
-# Step 1: read the range (oldest first; per-commit indexed hunks WITH content)
-hc log <base>..HEAD --json
+# 1. Survey the range cheaply: per-file flags + hunk_count, NO hunk content.
+hc log <base>..HEAD --files-only --json
 
-# Step 2: write a rewrite plan and execute via heredoc
-hc rewrite - <<'PLAN'
-{"rewrites": [
-  {"commit": "a1b2c3d4e5f6", "commits": [
-    {"message": "test: fork StoreOrderAction test", "files": [{"path": "tests/StoreOrderActionTest.php"}]},
-    {"message": "test: fork StorePaymentAction test", "files": [{"path": "tests/StorePaymentActionTest.php"}]}
-  ]}
-]}
-PLAN
+# 2. Generate the default one-file-per-commit plan (multi-file commits split,
+#    single-file commits and merges left as-is). Prints the plan; applies nothing.
+hc split <base>..HEAD > plan.json
+
+# 3. REVIEW the draft -- this is your semantic job:
+#    - DELETE rewrites that are mechanical sweeps (lint/rename/codemod): they should stay one commit.
+#    - Refine messages ({subject} ({basename}) is only a default; --message-template "{subject} :: {path}" etc.).
+#    - Add within-file hunk splits where one file carries separable ideas (see below).
+
+# 4. Validate, then apply.
+hc rewrite --dry-run --summary plan.json
+hc rewrite plan.json
+```
+
+**Hunk-level splitting within a file** works exactly like `hc run`: read that commit's entry from `hc log <range> --json` (WITH content) and assign hunk indices across replacement commits:
+
+```json
+{"rewrites": [{"commit": "a1b2c3d4e5f6", "commits": [
+  {"message": "feat: edit A", "files": [{"path": "f.go", "hunks": [0]}]},
+  {"message": "fix: edit B",  "files": [{"path": "f.go", "hunks": [1, 2]}]}
+]}]}
 ```
 
 Rules:
 
-1. **`commit`** is a SHA (12-char prefix from `hc log` is fine). Commits NOT listed in `rewrites` are kept as they are -- their SHAs still change because ancestry changes, but message/author/date/content stay identical.
-2. **Coverage applies per commit:** the replacement commits together must cover EVERY hunk of the original commit exactly once (same guarantee as `hc run`; no `allow_unplanned` here). Hunk indices come from that commit's entry in `hc log`.
-3. **Granularity rules apply unchanged:** default one file per replacement commit; split a file's hunks further when they carry separable ideas; keep mechanical sweeps together.
-4. **Conflict-free by construction:** each split must reproduce the original commit's tree byte-for-byte (hc verifies this), so downstream commits re-parent cleanly -- no rebase conflicts, and the working tree is never touched (uncommitted changes are safe).
-5. **Safety rails:** the old head is saved at `refs/hc/backup/<branch>` (restore with `git reset --hard <backup-ref>`); commits already on a remote are refused unless `--force` (a force-push will be needed); merge commits and the root commit cannot be split; requires a checked-out branch (no detached HEAD).
-6. **`--dry-run`** builds and validates the whole new history (including the tree invariant) without moving the branch.
-7. Exit codes match `hc run`: 2 = plan problem, nothing changed; the branch only ever moves in one final atomic step.
+1. **`commit`** is a SHA (12-char prefix from `hc log`/`hc split` is fine). Commits NOT listed in `rewrites` are kept as they are -- their SHAs still change because ancestry changes, but message/author/date/content stay identical.
+2. **Coverage applies per commit:** the replacement commits together must cover EVERY hunk of the original commit exactly once (same guarantee as `hc run`; no `allow_unplanned` here). **Hunk indices are per-file within the commit** (each file's hunks start at 0); for whole files just omit `hunks`.
+3. **Granularity rules apply unchanged:** default one file per replacement commit; split a file's hunks further when they carry separable ideas; keep mechanical sweeps together (delete them from `hc split` drafts).
+4. **Conflict-free by construction:** each split must reproduce the original commit's tree byte-for-byte (hc verifies it; the result reports `"tree_identical": true`), so downstream commits re-parent cleanly -- no rebase conflicts, and the working tree is never touched (uncommitted changes are safe).
+5. **Do NOT re-run tests/builds after a rewrite.** The final tree is byte-identical, so every build/test result is unchanged by construction -- `tree_identical: true` in the result is the only verification needed.
+6. **Merges mid-range are fine:** an untouched merge is preserved (re-parented with its other parents intact). Only SPLITTING a merge (or the root commit) is refused.
+7. **Protect other people's history:** `--protect origin/develop` (repeatable) refuses any rewrite of commits reachable from that ref -- use it whenever the branch builds on shared history, instead of eyeballing the range.
+8. **Safety rails:** the old head is saved at `refs/hc/backup/<branch>` (restore with `git reset --hard <backup-ref>`); commits already on a remote are refused unless `--force` (then `git push --force-with-lease`); requires a checked-out branch (no detached HEAD).
+9. **`--dry-run`** builds and validates the whole new history (including tree invariants) without moving the branch -- it works even on pushed history without `--force`. Add `--summary` to get counts (`{split, replacements, kept, total_after}`) without the full replacement list.
+10. Exit codes match `hc run`: 2 = plan problem, nothing changed; the branch only ever moves in one final atomic step.
 
 ## Error Recovery
 
@@ -235,9 +252,11 @@ Common validation errors:
 | `hc run plan.json` | Execute plan from file |
 | `hc run --prefix "WB-1234: " -` | Prepend a uniform prefix to every commit message |
 | `hc run --dry-run -` | Validate only (rarely needed; `run` validates first anyway) |
-| `hc log <base>..HEAD --json` | Per-commit indexed hunks for existing commits (input for rewrite) |
+| `hc log <base>..HEAD --files-only --json` | Cheap per-commit file survey (no hunk content) |
+| `hc log <base>..HEAD --json` | Per-commit indexed hunks WITH content (for hunk-level splits) |
+| `hc split <base>..HEAD` | Emit the default one-file-per-commit rewrite plan (review, then pipe) |
 | `hc rewrite - <<'PLAN' ... PLAN` | Split existing commits; conflict-free, backup ref kept |
-| `hc rewrite --dry-run -` | Validate a rewrite without moving the branch |
+| `hc rewrite --dry-run --summary -` | Validate a rewrite (counts only) without moving the branch |
 | `hc --version` | Show version |
 
 ## Installation
