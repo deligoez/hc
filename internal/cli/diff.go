@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -66,7 +65,7 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				if acErr, ok := err.(*output.ACError); ok {
 					printer.PrintError(acErr)
-					os.Exit(acErr.Code)
+					return &exitError{code: acErr.Code}
 				}
 				return err
 			}

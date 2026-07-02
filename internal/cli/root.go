@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"runtime/debug"
 
@@ -19,6 +21,17 @@ var (
 
 	printer *output.Printer
 )
+
+// exitError signals a specific process exit code from a command's RunE.
+// The error itself has already been printed by the time it is returned;
+// Execute only translates it into os.Exit.
+type exitError struct {
+	code int
+}
+
+func (e *exitError) Error() string {
+	return fmt.Sprintf("exit code %d", e.code)
+}
 
 func NewRootCmd() *cobra.Command {
 	if version == "dev" {
@@ -42,6 +55,8 @@ func NewRootCmd() *cobra.Command {
 				printer.NoColor = true
 			}
 		},
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	root.Version = version
@@ -60,7 +75,16 @@ func NewRootCmd() *cobra.Command {
 // Execute runs the root command.
 func Execute() {
 	root := NewRootCmd()
-	if err := root.Execute(); err != nil {
-		os.Exit(1)
+	err := root.Execute()
+	if err == nil {
+		return
 	}
+
+	var ee *exitError
+	if errors.As(err, &ee) {
+		os.Exit(ee.code)
+	}
+
+	fmt.Fprintln(os.Stderr, "Error:", err)
+	os.Exit(1)
 }

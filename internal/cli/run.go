@@ -39,7 +39,7 @@ func newRunCmd() *cobra.Command {
 					"Provide a valid file path or pipe JSON via stdin with \"-\".",
 				)
 				printer.PrintError(acErr)
-				os.Exit(ExitValidation)
+				return &exitError{code: ExitValidation}
 			}
 
 			runner := git.NewRunner(".")
@@ -47,7 +47,7 @@ func newRunCmd() *cobra.Command {
 			result, acErr := runPlan(planData, runner, dryRun)
 			if acErr != nil {
 				printer.PrintError(acErr)
-				os.Exit(acErr.Code)
+				return &exitError{code: acErr.Code}
 			}
 
 			if dryRun {
