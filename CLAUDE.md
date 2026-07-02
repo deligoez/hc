@@ -23,7 +23,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
         done                     builds patches
 ```
 
-1. Agent runs `hc diff --json` -- sees all hunks with indices
+1. Agent runs `hc diff --json` -- sees all hunks with indices, section (enclosing function), and content (changed lines)
 2. Agent writes a JSON plan mapping hunks to commits
 3. Agent runs `hc run plan.json` -- all commits created in one call
 
@@ -32,7 +32,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 | Command | Description |
 |---------|-------------|
 | `hc diff` | Show current diff with numbered hunk indices (TTY) |
-| `hc diff --json` | Same, structured JSON (preferred for agents) |
+| `hc diff --json` | Same, structured JSON with hunk content/section/fingerprint (preferred for agents) |
 | `hc run <plan.json>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |

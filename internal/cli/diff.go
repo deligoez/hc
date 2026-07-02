@@ -25,10 +25,13 @@ type diffFileJSON struct {
 
 // diffHunkJSON is the JSON representation of a hunk.
 type diffHunkJSON struct {
-	Index   int    `json:"index"`
-	Header  string `json:"header"`
-	Added   int64  `json:"added"`
-	Deleted int64  `json:"deleted"`
+	Index       int    `json:"index"`
+	Header      string `json:"header"`
+	Section     string `json:"section,omitempty"`
+	Added       int64  `json:"added"`
+	Deleted     int64  `json:"deleted"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Content     string `json:"content"`
 }
 
 // diffSummaryJSON is the JSON summary of the diff.
@@ -58,7 +61,7 @@ type diffFileResult struct {
 func newDiffCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "diff",
-		Short: "Show uncommitted changes with hunk fingerprints",
+		Short: "Show uncommitted changes with indexed hunks and content",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runner := git.NewRunner(".")
 			result, err := runDiff(runner)
@@ -155,6 +158,36 @@ func hunkHeader(h diff.Hunk) string {
 	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", h.OldStart, h.OldCount, h.NewStart, h.NewCount)
 }
 
+// hunkContent renders a hunk's changed lines as a compact diff body:
+// one "+"/"-" prefixed line per change, joined with newlines. With -U0
+// there are no context lines, so this is exactly the changed content.
+func hunkContent(h diff.Hunk) string {
+	var b strings.Builder
+	for i, l := range h.Lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		switch l.Op {
+		case diff.OpAdd:
+			b.WriteByte('+')
+		case diff.OpDelete:
+			b.WriteByte('-')
+		default:
+			b.WriteByte(' ')
+		}
+		b.WriteString(strings.TrimSuffix(l.Content, "\n"))
+	}
+	return b.String()
+}
+
+// shortFingerprint truncates a full SHA-256 hex fingerprint for display.
+func shortFingerprint(fp string) string {
+	if len(fp) > 12 {
+		return fp[:12]
+	}
+	return fp
+}
+
 func hunkLineSummary(h diff.Hunk) string {
 	if h.OldCount == 0 {
 		return fmt.Sprintf("(+%d lines)", h.NewCount)
@@ -191,7 +224,11 @@ func printDiffTTY(result *diffResult) {
 
 		fmt.Fprintf(printer.Out, "%s (%d hunks%s):\n", f.Path, len(f.Hunks), suffix)
 		for _, h := range f.Hunks {
-			fmt.Fprintf(printer.Out, "  [%d] %s  %s\n", h.Index, hunkHeader(h), hunkLineSummary(h))
+			header := hunkHeader(h)
+			if h.Section != "" {
+				header += " " + h.Section
+			}
+			fmt.Fprintf(printer.Out, "  [%d] %s  %s\n", h.Index, header, hunkLineSummary(h))
 		}
 	}
 }
@@ -215,10 +252,13 @@ func printDiffJSON(result *diffResult) error {
 
 		for _, h := range f.Hunks {
 			jf.Hunks = append(jf.Hunks, diffHunkJSON{
-				Index:   h.Index,
-				Header:  hunkHeader(h),
-				Added:   h.NewCount,
-				Deleted: h.OldCount,
+				Index:       h.Index,
+				Header:      hunkHeader(h),
+				Section:     h.Section,
+				Added:       h.NewCount,
+				Deleted:     h.OldCount,
+				Fingerprint: shortFingerprint(h.Fingerprint),
+				Content:     hunkContent(h),
 			})
 		}
 
