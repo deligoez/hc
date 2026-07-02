@@ -44,13 +44,15 @@ type diffSummaryJSON struct {
 
 // diffOutputJSON is the top-level JSON output for the diff command.
 type diffOutputJSON struct {
-	Files   []diffFileJSON  `json:"files"`
-	Summary diffSummaryJSON `json:"summary"`
+	Files    []diffFileJSON  `json:"files"`
+	Summary  diffSummaryJSON `json:"summary"`
+	Warnings []string        `json:"warnings,omitempty"`
 }
 
 // diffResult is the internal result of computing the diff.
 type diffResult struct {
-	Files []diffFileResult
+	Files    []diffFileResult
+	Warnings []string
 }
 
 type diffFileResult struct {
@@ -75,7 +77,8 @@ func newDiffCmd() *cobra.Command {
 
 			// Check for staged changes and warn
 			if err := runner.EnsureCleanStaging(); err != nil {
-				fmt.Fprintln(printer.ErrOut, "warning: staged changes exist; ac diff shows only unstaged changes")
+				result.Warnings = append(result.Warnings,
+					"staged changes exist; hc diff shows only unstaged changes and hc run will reject them -- run 'git reset HEAD' first")
 			}
 
 			if printer.UseJSON() {
@@ -129,7 +132,10 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 
 	// List untracked files
 	untrackedOut, err := runner.Run("ls-files", "--others", "--exclude-standard")
-	if err == nil {
+	if err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("cannot list untracked files: %v", err))
+	} else {
 		for _, line := range strings.Split(strings.TrimSpace(untrackedOut), "\n") {
 			if line == "" {
 				continue
@@ -199,6 +205,10 @@ func hunkLineSummary(h diff.Hunk) string {
 }
 
 func printDiffTTY(result *diffResult) {
+	for _, w := range result.Warnings {
+		fmt.Fprintln(printer.ErrOut, "warning:", w)
+	}
+
 	for i, f := range result.Files {
 		if i > 0 {
 			fmt.Fprintln(printer.Out)
@@ -235,7 +245,8 @@ func printDiffTTY(result *diffResult) {
 
 func printDiffJSON(result *diffResult) error {
 	out := diffOutputJSON{
-		Files: make([]diffFileJSON, 0, len(result.Files)),
+		Files:    make([]diffFileJSON, 0, len(result.Files)),
+		Warnings: result.Warnings,
 	}
 
 	for _, f := range result.Files {
