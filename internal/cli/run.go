@@ -42,7 +42,11 @@ func newRunCmd() *cobra.Command {
 				return &exitError{code: ExitValidation}
 			}
 
-			runner := git.NewRunner(".")
+			runner, acErr := newRepoRunner()
+			if acErr != nil {
+				printer.PrintError(acErr)
+				return &exitError{code: acErr.Code}
+			}
 
 			result, acErr := runPlan(planData, runner, dryRun)
 			if acErr != nil {

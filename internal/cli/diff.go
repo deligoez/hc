@@ -65,7 +65,12 @@ func newDiffCmd() *cobra.Command {
 		Use:   "diff",
 		Short: "Show uncommitted changes with indexed hunks and content",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runner := git.NewRunner(".")
+			runner, acErr := newRepoRunner()
+			if acErr != nil {
+				printer.PrintError(acErr)
+				return &exitError{code: acErr.Code}
+			}
+
 			result, err := runDiff(runner)
 			if err != nil {
 				if acErr, ok := err.(*output.ACError); ok {
