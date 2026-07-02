@@ -78,11 +78,8 @@ internal/
   diff/
     types.go                  FileDiff, Hunk, Line types
     parse.go                  Wraps go-gitdiff
-    fingerprint.go            SHA-256 content fingerprinting
-    match.go                  Hunk matching by fingerprint + content-subset fallback
-  patch/
-    build.go                  Patch construction with delta accumulation
-    apply.go                  git apply --cached --unidiff-zero wrapper
+    fingerprint.go            SHA-256 content fingerprinting (informational, diff output)
+    reconstruct.go            Content reconstruction -- the staging core
   plan/
     plan.go                   Plan, Commit, FileEntry types
     parse.go                  JSON parser with validation
@@ -91,24 +88,24 @@ internal/
     git.go                    Git command runner
     diff.go                   Diff, IntentToAdd, IsUntracked helpers
     commit.go                 Commit, Add, ResetHead helpers
+    index.go                  hash-object / update-index staging helpers
   output/
     output.go                 Result types, ACError, TTY/JSON printer
 skills/hc/SKILL.md            Agent skill for Claude Code
-spec/0.1.0.md                 Full specification
+spec/0.2.0.md                 Full specification
 ```
 
 ## Architecture
 
 ### Two-Phase Execution
 
-- **Phase 1 (Validation):** Parse plan, capture diff (`git diff -U0 --no-renames`), validate coverage (every hunk assigned), sequential dry-run with temporary index (`GIT_INDEX_FILE`). If anything fails: exit 2, no git state changed.
-- **Phase 2 (Execution):** For each commit: re-diff per file against current index, match hunks by content fingerprint, build adjusted patch via delta accumulation, apply, commit.
+- **Phase 1 (Validation):** Parse plan, capture diff (`git diff -U0 --no-renames`), validate coverage (every hunk assigned), capture per-file base blobs, verify base+all-hunks == working tree, simulate every commit's staging on a temporary index (`GIT_INDEX_FILE`). If anything fails: exit 2, no git state changed.
+- **Phase 2 (Execution):** For each commit: reconstruct staged content from base + committed + selected hunks (original diff coordinates -- never re-diffed), store via `git hash-object -w`, point the index at it via `git update-index --cacheinfo`, commit.
 
 ### Key Algorithms
 
-- **Delta accumulation** (from Git's `add-patch.c`): When selecting non-contiguous hunks, adjusts `+` side line numbers for skipped hunks.
-- **Content fingerprinting:** SHA-256 of ordered delete/add lines. Matches hunks across commits after line-number shifts.
-- **Content-subset fallback:** When git merges adjacent hunks (common after earlier commits shift line counts), uses subsequence matching to identify which current hunk contains the original hunk's content. `BuildCompositePatch` extracts sub-patches from merged hunks.
+- **Content reconstruction:** staged content = Reconstruct(base blob, union of committed+selected hunks), a pure text operation on original diff coordinates. Delete lines are verified byte-for-byte against the base (drift detection). No patch text, no `git apply`, no hunk re-matching -- immune to git re-splitting/sliding hunks over repeated content (proven by property fuzzing).
+- **Content fingerprinting:** SHA-256 of ordered delete/add lines; exposed in `hc diff --json` for hunk identification (informational only).
 
 ### Error Handling
 
@@ -124,7 +121,7 @@ spec/0.1.0.md                 Full specification
 - Renamed files as delete+add (`--no-renames`; git reconstructs renames at display time)
 - Binary files (full-file only, hunk-select = validation error)
 - No-trailing-newline files (`\ No newline at end of file` marker)
-- Adjacent hunk merging by git (automatic sub-patch extraction via `BuildCompositePatch`)
+- Repeated-content ambiguity (git re-splitting/sliding hunk windows) via reconstruction staging
 - Pre-staged changes = hard error (requires clean staging area)
 
 ## Conventions

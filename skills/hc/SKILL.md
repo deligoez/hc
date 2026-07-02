@@ -105,7 +105,7 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 
 1. **Run `hc diff --json` once, immediately before planning.** Classify each hunk from its `content` and `section`.
 2. **Assign EVERY hunk to exactly one commit.** Complete coverage is validated; unassigned hunks are a hard error.
-3. **Use original indices everywhere.** Even in later commits, reference hunks by their position in that one `hc diff` output -- hc re-matches them by content fingerprint after earlier commits shift line numbers.
+3. **Use original indices everywhere.** Even in later commits, reference hunks by their position in that one `hc diff` output -- hc rebuilds staged content from those original coordinates, so line-number shifts from earlier commits never matter.
 4. **Match the plan entry to the file state** (see the table above): untracked/binary/mode-only/deleted are full-file; renames need both paths.
 5. **Conventional commit messages** following the project's convention.
 6. **Use `allow_unplanned` sparingly** -- only for WIP that must stay uncommitted. `*` matches one path level; use `dir/**` for recursive.

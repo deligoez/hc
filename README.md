@@ -123,13 +123,12 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 **Two-phase execution:**
 
 - **Phase 1 (Validation):** Parse plan, capture diff, validate coverage, sequential dry-run with temporary index. If anything fails: exit 2, no git state changed.
-- **Phase 2 (Execution):** For each commit: re-diff against current index, match hunks by content fingerprint, build adjusted patch, apply, commit.
+- **Phase 2 (Execution):** For each commit: reconstruct the staged file content from the original diff, stage it directly into the index, commit.
 
 **Key algorithms:**
-- Delta accumulation for line-number adjustment (from Git's `add-patch.c`)
-- SHA-256 content fingerprinting for hunk matching across commits
-- Content-subset matching for handling git's merged adjacent hunks
-- Order-insensitive multiset fallback for ambiguous hunk windows over repeated content
+- Content reconstruction: staged content is rebuilt from the original diff coordinates (base blob + selected hunks) and staged directly via `git hash-object` + `git update-index` -- no patch application, no hunk re-matching
+- Byte-for-byte verification of every deletion against the base, plus a base+all-hunks == working-tree invariant before any commit
+- SHA-256 content fingerprinting exposed in `hc diff --json`
 
 ## Exit Codes
 
