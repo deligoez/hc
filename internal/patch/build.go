@@ -385,9 +385,11 @@ func countOccurrences(lines []string) map[string]int {
 	return m
 }
 
-// IsMergedHunk returns true if the current hunk was matched via content-subset
-// (i.e., the current hunk's fingerprint does NOT exactly match any of the
-// original hunks' fingerprints). This indicates git merged adjacent hunks.
+// IsMergedHunk reports whether currentHunk is a merged hunk: one that does
+// not exactly correspond to any of the original hunks mapped to it. A hunk
+// with a matching fingerprint, or with identical content as a multiset (git
+// slid an ambiguous window across repeated content, rotating line order), is
+// treated as exact -- applying the current hunk as-is yields the same result.
 func IsMergedHunk(currentHunk diff.Hunk, origHunks []diff.Hunk) bool {
 	cfp := currentHunk.Fingerprint
 	if cfp == "" {
@@ -399,6 +401,9 @@ func IsMergedHunk(currentHunk diff.Hunk, origHunks []diff.Hunk) bool {
 			fp = diff.Fingerprint(oh)
 		}
 		if cfp == fp {
+			return false
+		}
+		if diff.EqualContentMultiset(currentHunk, oh) {
 			return false
 		}
 	}

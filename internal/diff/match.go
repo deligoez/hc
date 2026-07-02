@@ -63,20 +63,35 @@ func MatchHunks(original, current []Hunk) (map[int]int, error) {
 
 		// Fallback: content-subset matching.
 		// The original hunk's lines may be a subset of a merged current hunk.
+		// A second, order-insensitive pass handles git sliding an ambiguous
+		// hunk window across repeated content: the same semantic change is
+		// reported with rotated line order, so ordered subsequence matching
+		// fails even though the change is identical.
 		bestIdx := -1
 		bestDist := int64(math.MaxInt64)
 		bestStart := int64(math.MaxInt64)
-		for ci, ch := range current {
-			if assigned[ci] {
-				continue
-			}
-			if containsAllLines(ch, oh) {
-				dist := abs64(oh.OldStart - ch.OldStart)
-				if dist < bestDist || (dist == bestDist && ch.OldStart < bestStart) {
-					bestDist = dist
-					bestStart = ch.OldStart
-					bestIdx = ci
+		for _, ordered := range []bool{true, false} {
+			for ci, ch := range current {
+				if assigned[ci] {
+					continue
 				}
+				matched := false
+				if ordered {
+					matched = containsAllLines(ch, oh)
+				} else {
+					matched = containsAllLinesMultiset(ch, oh)
+				}
+				if matched {
+					dist := abs64(oh.OldStart - ch.OldStart)
+					if dist < bestDist || (dist == bestDist && ch.OldStart < bestStart) {
+						bestDist = dist
+						bestStart = ch.OldStart
+						bestIdx = ci
+					}
+				}
+			}
+			if bestIdx >= 0 {
+				break
 			}
 		}
 
