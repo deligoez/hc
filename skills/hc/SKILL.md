@@ -82,6 +82,25 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | `commits[].files[].hunks` | int[] | Hunk indices from `hc diff`. Omit to stage the whole file. |
 | `allow_unplanned` | string[] | Globs excluded from coverage validation (`*` = one level, `**` = recursive) |
 
+## Repo Config (`.hc.json`)
+
+An optional `.hc.json` at the repo root configures commit message prefixing -- check for it before writing messages:
+
+```json
+{"commit": {"prefix": "${ticket}: ", "ticket_from_branch": "[A-Z]+-\\d+"}}
+```
+
+- `commit.prefix` is prepended to EVERY commit message by hc itself. `${ticket}` resolves via the `ticket_from_branch` regex against the current branch name (`feature/WB-1234-login` -> `WB-1234: feat(auth): add login`). A static prefix (no `${ticket}`) is prepended as-is.
+- **Write plain conventional messages and let hc add the prefix.** Prefixing is idempotent (already-prefixed messages are left alone), but do not duplicate the work.
+- If the ticket pattern does not match the branch, hc skips prefixing and reports it in `warnings` -- it never fails the plan for this.
+- A malformed `.hc.json` is a validation error (exit 2); fix or remove the file.
+
+## Anti-patterns -- do NOT do these
+
+- **Do NOT put untracked paths into `allow_unplanned` or into commits "to satisfy coverage".** Coverage validation only covers files with hunks in the diff. Entries in the top-level `untracked` array require NOTHING from you; reference one only when you actually want that new file committed. If you think hc demanded an untracked file, re-read the error -- it was about a different (tracked or intent-to-add) file.
+- **Do NOT run `git diff`, `git add`, or `git commit` alongside hc.** `hc diff --json` has everything; `hc run` does all staging.
+- **Do NOT re-run `hc diff` between commits of one plan.** One read, one plan, one run.
+
 ## Commit Granularity -- the most important rule
 
 Agents systematically err toward commits that are TOO BIG. Default to splitting.

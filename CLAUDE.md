@@ -64,6 +64,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 - `hunks` field: indices from `hc diff` output. Omit to stage entire file.
 - `allow_unplanned`: file paths/globs excluded from coverage validation (doublestar: `*` one level, `**` recursive).
 - Every hunk in the diff must be assigned to exactly one commit.
+- Optional `.hc.json` at repo root: `{"commit": {"prefix": "${ticket}: ", "ticket_from_branch": "[A-Z]+-\\d+"}}` prepends a branch-derived prefix to every commit message (idempotent; unresolved ticket skips with a warning).
 
 ## Structure
 
@@ -84,6 +85,8 @@ internal/
     plan.go                   Plan, Commit, FileEntry types
     parse.go                  JSON parser with validation
     validate.go               Coverage validation + field validation
+  config/
+    config.go                 Optional .hc.json repo config (commit message prefixing)
   git/
     git.go                    Git command runner
     diff.go                   Diff, IntentToAdd, IsUntracked helpers
