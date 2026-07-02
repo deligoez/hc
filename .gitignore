@@ -13,3 +13,6 @@ spec/tasks.json
 .idea/
 .vscode/
 *.swp
+
+# tooling artifacts
+.zigrep_archive
