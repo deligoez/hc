@@ -18,6 +18,8 @@ go test ./... -count=1   # no cache
 
 ALWAYS use `hc` itself to commit changes to this repo: build the binary (`go build -o /tmp/hc ./cmd/hc/`), run `/tmp/hc diff --json`, write a plan, and run it via heredoc. This dogfoods the agent workflow and surfaces UX problems and improvement ideas that unit tests cannot. Follow the granularity rules in `skills/hc/SKILL.md` (one reviewable idea per commit; feat/fix/test/docs never share a commit).
 
+Every time hc is used, if a UX problem, bug, or improvement opportunity is noticed, apply the improvement immediately (code fix, SKILL/spec update, test) and include it as its own commit in the current plan.
+
 ## How It Works
 
 ```
