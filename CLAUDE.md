@@ -42,8 +42,9 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 | `hc run <plan.json>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
-| `hc log <base>..<head>` | Per-commit indexed hunks (input for `hc rewrite`) |
-| `hc rewrite <plan>` | Split existing commits (conflict-free history rewrite, backup ref) |
+| `hc log <base>..<head>` | Per-commit indexed hunks (`--files-only` = survey mode) |
+| `hc split <base>..<head>` | Emit a draft one-file-per-commit rewrite plan |
+| `hc rewrite <plan>` | Split existing commits (conflict-free history rewrite, backup ref; `--protect <ref>`, `--summary`) |
 | `hc --version` | Show version |
 
 ## Plan Format
@@ -78,6 +79,7 @@ internal/
     diff.go                   hc diff command
     run.go                    hc run command (Phase 1 + Phase 2)
     log.go                    hc log command (per-commit hunks for rewrite)
+    split.go                  hc split command (draft file-first rewrite plans)
     rewrite.go                hc rewrite command (conflict-free history splitting)
     exitcodes.go              Exit 0/2/3
   diff/
