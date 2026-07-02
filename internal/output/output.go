@@ -39,12 +39,12 @@ type FileResult struct {
 
 // DryRunResult is the JSON output for hc run --dry-run.
 type DryRunResult struct {
-	Valid         bool            `json:"valid"`
-	Commits       int             `json:"commits"`
-	Files         int             `json:"files"`
-	HunksTotal    int             `json:"hunks_total"`
-	HunksAssigned int             `json:"hunks_assigned"`
-	Issues        []DryRunIssue   `json:"issues"`
+	Valid         bool          `json:"valid"`
+	Commits       int           `json:"commits"`
+	Files         int           `json:"files"`
+	HunksTotal    int           `json:"hunks_total"`
+	HunksAssigned int           `json:"hunks_assigned"`
+	Issues        []DryRunIssue `json:"issues"`
 }
 
 // DryRunIssue describes a validation issue in dry-run output.

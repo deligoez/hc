@@ -36,9 +36,9 @@ type diffHunkJSON struct {
 
 // diffSummaryJSON is the JSON summary of the diff.
 type diffSummaryJSON struct {
-	Files int   `json:"files"`
-	Hunks int   `json:"hunks"`
-	Added int64 `json:"added"`
+	Files   int   `json:"files"`
+	Hunks   int   `json:"hunks"`
+	Added   int64 `json:"added"`
 	Deleted int64 `json:"deleted"`
 }
 
