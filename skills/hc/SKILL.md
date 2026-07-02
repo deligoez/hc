@@ -182,7 +182,7 @@ Common validation errors:
 
 ```bash
 # Install the binary
-brew install deligoez/tap/deligoez-hc   # installs the 'hc' binary
+brew install deligoez/tap/hc   # alias for the deligoez-hc formula; installs the 'hc' binary
 
 # Install this skill for Claude Code
 npx skills add -g deligoez/hc

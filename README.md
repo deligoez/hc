@@ -11,7 +11,7 @@ AI agents produce large diffs that should be split into atomic commits. The agen
 **Homebrew** (macOS / Linux):
 
 ```bash
-brew install deligoez/tap/deligoez-hc   # installs the 'hc' binary (formula name differs to avoid a name clash)
+brew install deligoez/tap/hc   # alias for the deligoez-hc formula; installs the 'hc' binary
 ```
 
 **Go**:
