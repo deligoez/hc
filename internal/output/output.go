@@ -102,10 +102,14 @@ func (p *Printer) UseJSON() bool {
 	return p.ForceJSON || !p.IsTTY
 }
 
-// PrintJSON outputs a value as JSON.
+// PrintJSON outputs a value as JSON: pretty-printed on a TTY for humans,
+// compact otherwise -- agents parse it anyway and indentation only costs
+// tokens.
 func (p *Printer) PrintJSON(v any) error {
 	enc := json.NewEncoder(p.Out)
-	enc.SetIndent("", "  ")
+	if p.IsTTY {
+		enc.SetIndent("", "  ")
+	}
 	return enc.Encode(v)
 }
 
