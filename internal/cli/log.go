@@ -29,7 +29,8 @@ type logOutputJSON struct {
 }
 
 func newLogCmd() *cobra.Command {
-	return &cobra.Command{
+	var filesOnly bool
+	cmd := &cobra.Command{
 		Use:   "log <base>..<head>",
 		Short: "Show per-commit indexed hunks for a range (input for hc rewrite)",
 		Long: "Lists every commit in the range (oldest first) with the same indexed, content-carrying\n" +
@@ -43,7 +44,7 @@ func newLogCmd() *cobra.Command {
 				return &exitError{code: acErr.Code}
 			}
 
-			result, acErr := runLog(runner, args[0])
+			result, acErr := runLog(runner, args[0], filesOnly)
 			if acErr != nil {
 				printer.PrintError(acErr)
 				return &exitError{code: acErr.Code}
@@ -56,9 +57,11 @@ func newLogCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&filesOnly, "files-only", false, "Omit hunk content: per-file flags and hunk_count only (token saver for file-level planning)")
+	return cmd
 }
 
-func runLog(runner *git.Runner, rangeArg string) (*logOutputJSON, *output.ACError) {
+func runLog(runner *git.Runner, rangeArg string, filesOnly bool) (*logOutputJSON, *output.ACError) {
 	revsOut, err := runner.Run("rev-list", "--reverse", "--first-parent", rangeArg)
 	if err != nil {
 		return nil, output.NewValidationError(
@@ -107,10 +110,22 @@ func runLog(runner *git.Runner, rangeArg string) (*logOutputJSON, *output.ACErro
 				fmt.Sprintf("cannot parse diff of %s: %v", sha, err), "")
 		}
 		for i := range files {
-			for j := range files[i].Hunks {
-				files[i].Hunks[j].Fingerprint = diff.Fingerprint(files[i].Hunks[j])
+			if filesOnly {
+				jf := diffFileJSON{
+					Path:      files[i].Path,
+					Hunks:     []diffHunkJSON{},
+					HunkCount: len(files[i].Hunks),
+					IsNew:     files[i].IsNew,
+					IsDeleted: files[i].IsDeleted,
+					IsBinary:  files[i].IsBinary,
+				}
+				lc.Files = append(lc.Files, jf)
+			} else {
+				for j := range files[i].Hunks {
+					files[i].Hunks[j].Fingerprint = diff.Fingerprint(files[i].Hunks[j])
+				}
+				lc.Files = append(lc.Files, fileToJSON(files[i]))
 			}
-			lc.Files = append(lc.Files, fileToJSON(files[i]))
 			out.Summary.Hunks += len(files[i].Hunks)
 		}
 		out.Commits = append(out.Commits, lc)

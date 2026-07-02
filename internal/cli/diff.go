@@ -13,13 +13,15 @@ import (
 
 // diffFileJSON is the JSON representation of a file in the diff output.
 type diffFileJSON struct {
-	Path      string         `json:"path"`
-	Hunks     []diffHunkJSON `json:"hunks"`
-	IsNew     bool           `json:"is_new,omitempty"`
-	IsDeleted bool           `json:"is_deleted,omitempty"`
-	IsRenamed bool           `json:"is_renamed,omitempty"`
-	OldPath   string         `json:"old_path,omitempty"`
-	IsBinary  bool           `json:"is_binary,omitempty"`
+	Path  string         `json:"path"`
+	Hunks []diffHunkJSON `json:"hunks"`
+	// HunkCount replaces hunk bodies in hc log --files-only output.
+	HunkCount int    `json:"hunk_count,omitempty"`
+	IsNew     bool   `json:"is_new,omitempty"`
+	IsDeleted bool   `json:"is_deleted,omitempty"`
+	IsRenamed bool   `json:"is_renamed,omitempty"`
+	OldPath   string `json:"old_path,omitempty"`
+	IsBinary  bool   `json:"is_binary,omitempty"`
 	// IsIntentToAdd marks files that appear in the diff only because of a
 	// git add -N index entry. hc run skips them from coverage validation
 	// unless the plan references them. Plain untracked files are listed in
