@@ -504,7 +504,7 @@ func TestSplitEmitsFileFirstPlanThatRewriteAccepts(t *testing.T) {
 	mkCommit(t, r, dir, "WB-8: feat: multi two", map[string]string{"a.txt": "a3\n", "c.txt": "c3\n"})
 	oldHead, _ := r.ResolveSHA("HEAD")
 
-	rp, skipped, acErr := runSplit(r, baseSHA+"..HEAD", "{subject} ({basename})")
+	rp, skipped, acErr := runSplit(r, baseSHA+"..HEAD", "{subject} ({basename})", false)
 	if acErr != nil {
 		t.Fatalf("split failed: %v", acErr)
 	}
@@ -529,3 +529,77 @@ func TestSplitEmitsFileFirstPlanThatRewriteAccepts(t *testing.T) {
 }
 
 func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
+
+// TestSplitHunksModeGroupsBySection replicates the production under-split:
+// one file, imports at the top (sectionless hunks) plus three separate ideas
+// in three functions. --hunks must propose one sub-commit per section, with
+// the imports attached to the first idea they precede.
+func TestSplitHunksModeGroupsBySection(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+
+	base := `package m
+
+import (
+	"fmt"
+)
+
+func region() {
+	a := 1
+	_ = a
+	fmt.Println("r")
+}
+
+func guard() bool {
+	return true
+}
+
+func endpoint() {
+	fmt.Println("e")
+}
+`
+	must(t, os.WriteFile(filepath.Join(dir, "machine.go"), []byte(base), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+	baseSHA, _ := r.ResolveSHA("HEAD")
+
+	mut := strings.ReplaceAll(base, "import (\n\t\"fmt\"\n)", "import (\n\t\"fmt\"\n\t\"os\"\n)")
+	mut = strings.ReplaceAll(mut, "\ta := 1", "\ta := 42\n\t_ = os.Args")
+	mut = strings.ReplaceAll(mut, "\treturn true", "\treturn false")
+	mut = strings.ReplaceAll(mut, "fmt.Println(\"e\")", "fmt.Println(\"endpoint v2\")")
+	must(t, os.WriteFile(filepath.Join(dir, "machine.go"), []byte(mut), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "WB-9: machine changes"))
+	oldHead, _ := r.ResolveSHA("HEAD")
+
+	rp, _, acErr := runSplit(r, baseSHA+"..HEAD", "", true)
+	if acErr != nil {
+		t.Fatalf("split --hunks failed: %v", acErr)
+	}
+	subs := rp.Rewrites[0].Commits
+	// Four groups: imports (git labels them with the package clause) plus
+	// one per touched function. Merging imports into the group that uses
+	// them is review-time judgment -- the draft only proposes.
+	if len(subs) != 4 {
+		t.Fatalf("want 4 section groups, got %d: %+v", len(subs), subs)
+	}
+	for _, want := range []string{"region", "guard", "endpoint"} {
+		found := false
+		for _, c := range subs {
+			if strings.Contains(c.Message, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("no sub-commit labeled %q: %+v", want, subs)
+		}
+	}
+
+	// The draft must be directly executable and content-preserving.
+	planJSON, err := jsonMarshal(rp)
+	must(t, err)
+	if _, acErr := runRewrite(planJSON, r, rewriteOpts{}); acErr != nil {
+		t.Fatalf("hunks-mode draft rejected by rewrite: %v | %s", acErr, acErr.Hint)
+	}
+	assertSameContent(t, r, oldHead, "HEAD")
+}
