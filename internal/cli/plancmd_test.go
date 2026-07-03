@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
 	"github.com/deligoez/hc/internal/output"
 	"github.com/deligoez/hc/internal/plan"
@@ -124,4 +125,57 @@ func TestMultiSectionBundleWarns(t *testing.T) {
 	if !found {
 		t.Fatalf("expected a granularity warning, got %v", result.Warnings)
 	}
+}
+
+// TestGapFallbackGrouping covers the signal hierarchy's second tier: files
+// where sections cannot discriminate (configs, plain text) group by
+// contiguity gaps instead -- exactly the "10-20 and 30-34 are probably two
+// ideas, 2-8 and 12-15 probably one" intuition.
+func TestGapFallbackGrouping(t *testing.T) {
+	mk := func(oldStart, oldCount int64) diffHunkForTest {
+		return diffHunkForTest{oldStart, oldCount}
+	}
+	cases := []struct {
+		name   string
+		hunks  []diffHunkForTest
+		groups int
+	}{
+		{"far regions split", []diffHunkForTest{mk(10, 11), mk(30, 5)}, 2}, // gap 9 > 8
+		{"near regions stay", []diffHunkForTest{mk(2, 7), mk(12, 4)}, 0},   // gap 3 <= 8 -> single group -> no proposal
+		{"three regions", []diffHunkForTest{mk(5, 3), mk(40, 2), mk(90, 1)}, 3},
+	}
+	for _, tc := range cases {
+		got := groupHunksBySection(buildSectionlessHunks(tc.hunks))
+		if tc.groups == 0 {
+			if got != nil {
+				t.Errorf("%s: want no proposal, got %+v", tc.name, got)
+			}
+			continue
+		}
+		if len(got) != tc.groups {
+			t.Errorf("%s: groups = %d, want %d (%+v)", tc.name, len(got), tc.groups, got)
+		}
+		if tc.groups > 0 && got != nil && !strings.HasPrefix(got[0].section, "lines ") {
+			t.Errorf("%s: gap groups should be labeled by line span, got %q", tc.name, got[0].section)
+		}
+	}
+
+	// Scattered-many pattern (lock files): no proposal at all.
+	var many []diffHunkForTest
+	for i := 0; i < 9; i++ {
+		many = append(many, mk(int64(10+i*50), 2))
+	}
+	if got := groupHunksBySection(buildSectionlessHunks(many)); got != nil {
+		t.Errorf("scattered-many file must not be gap-split, got %d groups", len(got))
+	}
+}
+
+type diffHunkForTest struct{ oldStart, oldCount int64 }
+
+func buildSectionlessHunks(specs []diffHunkForTest) []diff.Hunk {
+	var hunks []diff.Hunk
+	for i, s := range specs {
+		hunks = append(hunks, diff.Hunk{Index: i, OldStart: s.oldStart, OldCount: s.oldCount})
+	}
+	return hunks
 }
