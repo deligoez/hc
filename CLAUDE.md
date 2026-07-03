@@ -20,6 +20,10 @@ ALWAYS use `hc` itself to commit changes to this repo: build the binary (`go bui
 
 Every time hc is used, if a UX problem, bug, or improvement opportunity is noticed, apply the improvement immediately (code fix, SKILL/spec update, test) and include it as its own commit in the current plan.
 
+## Releasing
+
+Tagging `vX.Y.Z` triggers goreleaser (binaries + brew formula); pushing master publishes the skill. RULE: every release MUST get curated release notes -- goreleaser's grouped changelog is only a fallback. Write them in the house style of the previous releases (`# hc vX.Y.Z`, one-line tagline, `## Highlights` with a subsection and code sample per feature, breaking changes called out, short `## Docs` section) and apply with `gh release edit vX.Y.Z --notes-file notes.md` right after the release lands.
+
 ## How It Works
 
 ```
