@@ -281,6 +281,14 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...stri
 		return nil, output.NewValidationError(err.Error(), "")
 	}
 
+	// --- Step 8a: Advisory granularity check ---
+	// A commit whose hunk selection for one file spans multiple enclosing
+	// sections is often more than one idea. Mechanically undecidable (a
+	// single idea can touch several functions), so this only warns.
+	if w := multiSectionWarning(p, parsedFiles); w != "" {
+		warnings = append(warnings, w)
+	}
+
 	// --- Step 8b: Capture base content for every hunk-mode file ---
 	states, acErr := buildFileStates(p, parsedFiles, runner)
 	if acErr != nil {
@@ -326,6 +334,53 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...stri
 // left alone). "${ticket}" in the prefix resolves via ticket_from_branch
 // against the current branch name; an unresolved ticket skips prefixing and
 // returns a warning instead of failing the plan.
+// multiSectionWarning reports commits that bundle hunks from multiple
+// sections of one file, as a single aggregated advisory line.
+func multiSectionWarning(p *plan.Plan, parsedFiles []diff.FileDiff) string {
+	diffMap := make(map[string]*diff.FileDiff, len(parsedFiles))
+	for i := range parsedFiles {
+		diffMap[parsedFiles[i].Path] = &parsedFiles[i]
+	}
+	var hits []string
+	for ci, c := range p.Commits {
+		for _, f := range c.Files {
+			fd := diffMap[f.Path]
+			if fd == nil {
+				continue
+			}
+			indices := f.Hunks
+			if f.IsFullFile() {
+				indices = nil
+				for _, h := range fd.Hunks {
+					indices = append(indices, h.Index)
+				}
+			}
+			seen := map[string]bool{}
+			var labels []string
+			for _, idx := range indices {
+				if idx < 0 || idx >= len(fd.Hunks) {
+					continue
+				}
+				if l := sectionLabel(fd.Hunks[idx].Section); l != "" && !seen[l] {
+					seen[l] = true
+					labels = append(labels, l)
+				}
+			}
+			if len(labels) > 1 {
+				hits = append(hits, fmt.Sprintf("commit %d: %s spans %s", ci, f.Path, strings.Join(labels, ", ")))
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return ""
+	}
+	sample := hits[0]
+	if len(hits) > 1 {
+		sample += fmt.Sprintf(" (+%d more)", len(hits)-1)
+	}
+	return fmt.Sprintf("review granularity: %d commit(s) bundle hunks from multiple sections of one file -- split unless each is a single idea. %s", len(hits), sample)
+}
+
 // fileState holds everything needed to rebuild a hunk-mode file's staged
 // content at any point in the plan: the parsed diff and the file's base
 // content (its stage-0 index blob at capture time). Staged content for a
