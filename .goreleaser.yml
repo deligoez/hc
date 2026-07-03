@@ -58,9 +58,26 @@ brews:
     test: |
       assert_match "hc version", shell_output("#{bin}/hc --version")
 
+# The generated changelog is only a fallback: after tagging, curated release
+# notes in the house style (see previous releases) are written over it with
+# `gh release edit vX.Y.Z --notes-file <notes.md>`.
 changelog:
   sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Performance
+      regexp: '^perf(\(.+\))?!?:'
+      order: 2
+    - title: Other
+      order: 999
   filters:
     exclude:
-      - "^chore\\(deps\\)"
-      - "^docs\\(changelog\\)"
+      - "^test"
+      - "^chore"
+      - "^docs"
+      - "^refactor"
