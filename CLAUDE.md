@@ -46,6 +46,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 | `hc run <plan.json>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc plan` | Draft working-tree plan (file-first + section-split; TODO messages rejected by run) |
 | `hc log <base>..<head>` | Per-commit indexed hunks (`--files-only` = survey mode) |
 | `hc split <base>..<head>` | Emit a draft one-file-per-commit rewrite plan |
 | `hc rewrite <plan>` | Split existing commits (conflict-free history rewrite, backup ref; `--protect <ref>`, `--summary`) |
@@ -81,6 +82,7 @@ internal/
   cli/
     root.go                   Cobra root, --json/--quiet/--no-color flags
     diff.go                   hc diff command
+    plancmd.go                hc plan command (draft working-tree plans)
     run.go                    hc run command (Phase 1 + Phase 2)
     log.go                    hc log command (per-commit hunks for rewrite)
     split.go                  hc split command (draft file-first rewrite plans)
