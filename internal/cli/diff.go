@@ -42,6 +42,12 @@ type diffHunkJSON struct {
 	Deleted     int64  `json:"deleted"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Content     string `json:"content"`
+	// ContentTruncated marks oversized hunks whose Content carries only a
+	// head/tail sample; ContentOmittedLines counts the elided middle. The
+	// counts and fingerprint still identify the hunk fully, and hc run never
+	// reads Content -- fetch the full body with git if genuinely needed.
+	ContentTruncated    bool `json:"content_truncated,omitempty"`
+	ContentOmittedLines int  `json:"content_omitted_lines,omitempty"`
 }
 
 // diffSummaryJSON is the JSON summary of the diff.
@@ -172,15 +178,23 @@ func hunkHeader(h diff.Hunk) string {
 	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", h.OldStart, h.OldCount, h.NewStart, h.NewCount)
 }
 
+// Oversized-hunk cap: a single huge hunk (e.g. a 70k-line block replace)
+// would otherwise inline megabytes into the JSON and blow an agent's
+// context. Above maxContentLines changed lines, Content carries the first
+// contentHeadLines and last contentTailLines with an explicit marker.
+const (
+	maxContentLines  = 100
+	contentHeadLines = 80
+	contentTailLines = 10
+)
+
 // hunkContent renders a hunk's changed lines as a compact diff body:
 // one "+"/"-" prefixed line per change, joined with newlines. With -U0
 // there are no context lines, so this is exactly the changed content.
-func hunkContent(h diff.Hunk) string {
-	var b strings.Builder
-	for i, l := range h.Lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
+// It returns the rendered body plus the number of omitted middle lines
+// (0 when the hunk fits whole).
+func hunkContent(h diff.Hunk) (string, int) {
+	writeLine := func(b *strings.Builder, l diff.Line) {
 		switch l.Op {
 		case diff.OpAdd:
 			b.WriteByte('+')
@@ -191,7 +205,31 @@ func hunkContent(h diff.Hunk) string {
 		}
 		b.WriteString(strings.TrimSuffix(l.Content, "\n"))
 	}
-	return b.String()
+
+	var b strings.Builder
+	if len(h.Lines) <= maxContentLines {
+		for i, l := range h.Lines {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			writeLine(&b, l)
+		}
+		return b.String(), 0
+	}
+
+	omitted := len(h.Lines) - contentHeadLines - contentTailLines
+	for i := 0; i < contentHeadLines; i++ {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		writeLine(&b, h.Lines[i])
+	}
+	fmt.Fprintf(&b, "\n[hc: %d lines omitted]", omitted)
+	for i := len(h.Lines) - contentTailLines; i < len(h.Lines); i++ {
+		b.WriteByte('\n')
+		writeLine(&b, h.Lines[i])
+	}
+	return b.String(), omitted
 }
 
 // shortFingerprint truncates a full SHA-256 hex fingerprint for display.
@@ -281,14 +319,17 @@ func printDiffJSON(result *diffResult) error {
 				seenSections[label] = true
 				jf.Sections = append(jf.Sections, label)
 			}
+			content, omitted := hunkContent(h)
 			jf.Hunks = append(jf.Hunks, diffHunkJSON{
-				Index:       h.Index,
-				Header:      hunkHeader(h),
-				Section:     h.Section,
-				Added:       h.NewCount,
-				Deleted:     h.OldCount,
-				Fingerprint: shortFingerprint(h.Fingerprint),
-				Content:     hunkContent(h),
+				Index:               h.Index,
+				Header:              hunkHeader(h),
+				Section:             h.Section,
+				Added:               h.NewCount,
+				Deleted:             h.OldCount,
+				Fingerprint:         shortFingerprint(h.Fingerprint),
+				Content:             content,
+				ContentTruncated:    omitted > 0,
+				ContentOmittedLines: omitted,
 			})
 		}
 

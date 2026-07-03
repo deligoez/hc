@@ -163,14 +163,17 @@ func fileToJSON(f diff.FileDiff) diffFileJSON {
 		IsBinary:  f.IsBinary,
 	}
 	for _, h := range f.Hunks {
+		content, omitted := hunkContent(h)
 		jf.Hunks = append(jf.Hunks, diffHunkJSON{
-			Index:       h.Index,
-			Header:      hunkHeader(h),
-			Section:     h.Section,
-			Added:       h.NewCount,
-			Deleted:     h.OldCount,
-			Fingerprint: shortFingerprint(h.Fingerprint),
-			Content:     hunkContent(h),
+			Index:               h.Index,
+			Header:              hunkHeader(h),
+			Section:             h.Section,
+			Added:               h.NewCount,
+			Deleted:             h.OldCount,
+			Fingerprint:         shortFingerprint(h.Fingerprint),
+			Content:             content,
+			ContentTruncated:    omitted > 0,
+			ContentOmittedLines: omitted,
 		})
 	}
 	return jf

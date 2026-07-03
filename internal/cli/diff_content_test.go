@@ -37,7 +37,7 @@ func TestDiffHunkContentAndSection(t *testing.T) {
 	}
 	h := result.Files[0].Hunks[0]
 
-	content := hunkContent(h)
+	content, _ := hunkContent(h)
 	if !strings.Contains(content, "-\tb := 2") {
 		t.Errorf("content should include deleted line, got %q", content)
 	}
