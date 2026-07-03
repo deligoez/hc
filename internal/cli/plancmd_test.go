@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,4 +179,85 @@ func buildSectionlessHunks(specs []diffHunkForTest) []diff.Hunk {
 		hunks = append(hunks, diff.Hunk{Index: i, OldStart: s.oldStart, OldCount: s.oldCount})
 	}
 	return hunks
+}
+
+// TestHugeHunkContentTruncated guards the oversized-hunk cap: a giant
+// contiguous replacement must not inline its full body into the JSON.
+func TestHugeHunkContentTruncated(t *testing.T) {
+	var lines []diff.Line
+	for i := 0; i < 5000; i++ {
+		lines = append(lines, diff.Line{Op: diff.OpAdd, Content: "added line\n"})
+	}
+	content, omitted := hunkContent(diff.Hunk{Lines: lines})
+	if omitted != 5000-80-10 {
+		t.Fatalf("omitted = %d", omitted)
+	}
+	if !strings.Contains(content, "[hc: 4910 lines omitted]") {
+		t.Fatal("marker missing")
+	}
+	if strings.Count(content, "\n") > 100 {
+		t.Fatalf("content still too large: %d lines", strings.Count(content, "\n"))
+	}
+
+	// Small hunks stay whole.
+	small, om := hunkContent(diff.Hunk{Lines: lines[:5]})
+	if om != 0 || strings.Contains(small, "omitted") {
+		t.Fatal("small hunk must not be truncated")
+	}
+}
+
+// TestPlainTextFilesUseGapFallback guards the fix for synthetic sections:
+// git's default funcname makes any non-indented line a "section" for text
+// files, which must NOT drive grouping -- otherwise 12 scattered edits in a
+// text file explode into 12 draft entries and the scattered-many guard is
+// dead code.
+func TestPlainTextFilesUseGapFallback(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+
+	var rows []string
+	for i := 0; i < 2000; i++ {
+		rows = append(rows, fmt.Sprintf("row-%05d", i))
+	}
+	must(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(strings.Join(rows, "\n")+"\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+
+	// (a) 12 scattered edits: no split proposal, single file entry.
+	mut := append([]string(nil), rows...)
+	for i := 0; i < 12; i++ {
+		mut[50+i*150] = fmt.Sprintf("edited-%d", i)
+	}
+	must(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(strings.Join(mut, "\n")+"\n"), 0o644))
+	draft := planDraft(t, r)
+	if len(draft.Commits) != 1 || draft.Commits[0].Files[0].Hunks != nil {
+		t.Fatalf("scattered-many text file should stay one whole-file entry, got %+v", draft.Commits)
+	}
+	// And its sections array must be empty (synthetic labels filtered).
+	res, err := runDiff(r)
+	must(t, err)
+	if labels := 0; true {
+		for _, h := range res.Files[0].Hunks {
+			if sectionLabel(h.Section) != "" {
+				labels++
+			}
+		}
+		if labels != 0 {
+			t.Fatalf("synthetic text sections should be filtered, found %d", labels)
+		}
+	}
+
+	// (b) 3 far-apart edits: gap fallback proposes 3 groups labeled by span.
+	mut = append([]string(nil), rows...)
+	mut[100] = "far-a"
+	mut[900] = "far-b"
+	mut[1700] = "far-c"
+	must(t, os.WriteFile(filepath.Join(dir, "data.txt"), []byte(strings.Join(mut, "\n")+"\n"), 0o644))
+	draft = planDraft(t, r)
+	if len(draft.Commits) != 3 {
+		t.Fatalf("3 far regions should yield 3 gap groups, got %+v", draft.Commits)
+	}
+	if !strings.Contains(draft.Commits[0].Message, "lines ") {
+		t.Fatalf("gap groups should be labeled by line span: %q", draft.Commits[0].Message)
+	}
 }
