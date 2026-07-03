@@ -262,8 +262,16 @@ func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
 }
 
 // sectionLabel trims a raw function-context line down to a short label.
+// Labels that do not look like code constructs return "" -- git's DEFAULT
+// funcname regex treats any non-indented line as context, so plain-text and
+// config files get synthetic "sections" that are just nearby content. Those
+// must not drive grouping, the sections array, or granularity warnings; the
+// contiguity-gap fallback handles such files instead.
 func sectionLabel(section string) string {
 	s := strings.TrimSpace(section)
+	if s == "" || !looksLikeCodeSection(s) {
+		return ""
+	}
 	if i := strings.Index(s, "("); i > 0 {
 		s = s[:i]
 	}
@@ -272,4 +280,24 @@ func sectionLabel(section string) string {
 		return fields[len(fields)-1]
 	}
 	return s
+}
+
+// looksLikeCodeSection reports whether a raw function-context line plausibly
+// names a code construct: it has a parameter list, or starts with a
+// declaration keyword. Arbitrary prose/config lines fail both.
+func looksLikeCodeSection(s string) bool {
+	if strings.Contains(s, "(") {
+		return true
+	}
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.ToLower(fields[0]) {
+	case "func", "def", "fn", "sub", "function",
+		"class", "struct", "enum", "interface", "trait", "impl",
+		"module", "namespace", "package", "type", "object", "abstract":
+		return true
+	}
+	return false
 }
