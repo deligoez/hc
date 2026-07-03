@@ -36,6 +36,12 @@ func ValidateFields(p *Plan) error {
 				"Each commit must have a non-empty message string.",
 			)
 		}
+		if strings.HasPrefix(strings.TrimSpace(c.Message), "TODO") {
+			return output.NewValidationError(
+				fmt.Sprintf("commit %d message is an unedited draft: %q", i, c.Message),
+				"Replace every TODO placeholder from 'hc plan' with a real commit message.",
+			)
+		}
 
 		if len(c.Files) == 0 {
 			return output.NewValidationError(
