@@ -16,12 +16,16 @@ type diffFileJSON struct {
 	Path  string         `json:"path"`
 	Hunks []diffHunkJSON `json:"hunks"`
 	// HunkCount replaces hunk bodies in hc log --files-only output.
-	HunkCount int    `json:"hunk_count,omitempty"`
-	IsNew     bool   `json:"is_new,omitempty"`
-	IsDeleted bool   `json:"is_deleted,omitempty"`
-	IsRenamed bool   `json:"is_renamed,omitempty"`
-	OldPath   string `json:"old_path,omitempty"`
-	IsBinary  bool   `json:"is_binary,omitempty"`
+	HunkCount int `json:"hunk_count,omitempty"`
+	// Sections lists the distinct enclosing sections the file's hunks touch,
+	// in order. More than one usually means more than one idea: plan
+	// hunk-level splits instead of bundling the whole file.
+	Sections  []string `json:"sections,omitempty"`
+	IsNew     bool     `json:"is_new,omitempty"`
+	IsDeleted bool     `json:"is_deleted,omitempty"`
+	IsRenamed bool     `json:"is_renamed,omitempty"`
+	OldPath   string   `json:"old_path,omitempty"`
+	IsBinary  bool     `json:"is_binary,omitempty"`
 	// IsIntentToAdd marks files that appear in the diff only because of a
 	// git add -N index entry. hc run skips them from coverage validation
 	// unless the plan references them. Plain untracked files are listed in
@@ -271,7 +275,12 @@ func printDiffJSON(result *diffResult) error {
 			IsIntentToAdd: f.IsNew,
 		}
 
+		seenSections := map[string]bool{}
 		for _, h := range f.Hunks {
+			if label := sectionLabel(h.Section); label != "" && !seenSections[label] {
+				seenSections[label] = true
+				jf.Sections = append(jf.Sections, label)
+			}
 			jf.Hunks = append(jf.Hunks, diffHunkJSON{
 				Index:       h.Index,
 				Header:      hunkHeader(h),
