@@ -23,9 +23,23 @@ This skill activates when:
 # Do NOT run 'git diff' separately -- hc diff --json already includes hunk content.
 hc diff --json
 
-# Step 2: Write the plan (see rules below), then execute via heredoc.
-# ALWAYS use a quoted heredoc, never echo '<json>' -- commit messages
-# containing quotes break shell quoting.
+# Step 2 (RECOMMENDED): start from the draft plan -- never from a blank page.
+hc plan > draft.json
+```
+
+`hc plan` emits the finest mechanical split: one commit per file, split further by enclosing section when a file's hunks span several. Every message is a `TODO (...)` placeholder and **`hc run` refuses TODO messages**, so each entry must be reviewed. Your review job, per entry:
+
+1. **Write a real commit message.** While writing it, sanity-check the entry is one idea.
+2. **MERGE entries that belong together** -- mechanical sweeps, inseparable changes, one idea that happens to span sections. Merging is a conscious act; splitting is the default you inherit.
+3. **Drop untracked entries** you don't want committed.
+
+```bash
+hc run draft.json
+```
+
+Hand-written plans (heredoc) remain fine for small diffs -- but read each hunk's `section`/`content` before bundling, and heed the `review granularity` warning `hc run` emits when one commit bundles hunks from multiple sections of a file:
+
+```bash
 hc run - <<'PLAN'
 {"commits":[{"message":"feat(auth): add login","files":[{"path":"auth.go","hunks":[0,1]}]}]}
 PLAN
@@ -39,6 +53,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 
 - `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines.
 - `section` -- the enclosing function/context from git (which function does this hunk touch?).
+- Per-file `sections` -- the distinct sections the file's hunks touch, in order. **More than one entry = probably more than one idea**: plan hunk-level splits.
 - `index` -- what you reference in the plan.
 - Top-level `untracked` -- plain untracked paths (compact string array). They carry no hunks and never enter coverage validation; plan a path only to commit that new file.
 - Top-level `warnings` -- non-fatal issues (e.g. pre-staged changes that `hc run` will reject). Always check it.
@@ -94,6 +109,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - **Do NOT run `git diff`, `git add`, or `git commit` alongside hc.** `hc diff --json` has everything; `hc run` does all staging.
 - **Do NOT re-run `hc diff` between commits of one plan.** One read, one plan, one run.
 - **Do NOT bundle same-kind work across files** ("add tests for X, Y and Z" in one commit). Unless it is a mechanical sweep or an inseparable change, every file is its own commit.
+- **Do NOT write `hunks: [all indices]` (or omit `hunks`) for a multi-hunk file without reading each hunk's `section`/`content`.** This is the most common under-split. Start from `hc plan` instead -- it pre-splits by section -- and treat `hc run`'s `review granularity` warning as a prompt to re-check.
 
 ## Commit Granularity -- the most important rule
 
@@ -107,7 +123,7 @@ Agents systematically err toward commits that are TOO BIG. Default to splitting.
 Everything else splits:
 
 - **Same KIND of change across files is not a sweep.** "Fork the Store* action tests" over 9 files is 9 commits (`test: fork StoreOrderAction test`, `test: fork StorePaymentAction test`, ...) -- each file reviews and reverts on its own. A sweep transforms existing lines mechanically; writing/forking N distinct files is N pieces of work.
-- **Split within a file too.** If a file's hunks carry separable ideas (use `section`/`content` to judge), give each its own commit -- five new tests in one file = five commits.
+- **Split within a file too -- the most-skipped rule.** If a file's hunks carry separable ideas, give each its own commit. Check the file's `sections` array first: more than one section usually means more than one idea. Worked example: a state-machine file with 5 hunks across `region`, `isReadyForSubmission` and a new endpoint = 3 commits (imports ride with the code that needs them), NOT `"hunks": [0,1,2,3,4]` in one.
 - **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit.
 - **The litmus tests:** (a) would the commit message still be accurate for each file alone? Then each file is its own commit. (b) Could `git revert` of this commit undo exactly one decision?
 - **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
@@ -247,6 +263,7 @@ Common validation errors:
 | Command | Purpose |
 |---------|---------|
 | `hc diff --json` | Indexed hunks WITH content and section -- everything needed to plan |
+| `hc plan > draft.json` | Draft plan: file-first + section-split, TODO messages (run refuses TODOs) |
 | `hc diff` | Same, compact TTY view (no content) |
 | `hc run - <<'PLAN' ... PLAN` | Execute plan from stdin (preferred) |
 | `hc run plan.json` | Execute plan from file |
@@ -255,6 +272,7 @@ Common validation errors:
 | `hc log <base>..HEAD --files-only --json` | Cheap per-commit file survey (no hunk content) |
 | `hc log <base>..HEAD --json` | Per-commit indexed hunks WITH content (for hunk-level splits) |
 | `hc split <base>..HEAD` | Emit the default one-file-per-commit rewrite plan (review, then pipe) |
+| `hc split --hunks <range>` | Same, plus within-file splits grouped by section (draft heuristic) |
 | `hc rewrite - <<'PLAN' ... PLAN` | Split existing commits; conflict-free, backup ref kept |
 | `hc rewrite --dry-run --summary -` | Validate a rewrite (counts only) without moving the branch |
 | `hc --version` | Show version |
