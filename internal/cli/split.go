@@ -161,16 +161,39 @@ type hunkGroup struct {
 	indices []int
 }
 
-// groupHunksBySection groups a file's hunks by their enclosing section
-// (git's function-context line, trimmed at the parameter list). Hunks with
-// no section -- typically imports at the top of the file -- inherit the NEXT
-// hunk's section, since they usually exist to serve it. The grouping is a
-// draft heuristic for hc split --hunks; the reviewing agent refines it.
+// Gap-fallback tuning: when section labels cannot discriminate, hunks
+// separated by more than sectionGapThreshold unchanged lines are proposed as
+// separate groups -- but only for files with at most maxGapSplitHunks hunks.
+// Many scattered hunks in one file (lock files, generated output, snapshots)
+// almost always belong to ONE mechanical change, and exploding them into
+// draft entries would be pure review noise.
+const (
+	sectionGapThreshold = 8
+	maxGapSplitHunks    = 6
+)
+
+// groupHunksBySection groups a file's hunks into split proposals using a
+// signal hierarchy: enclosing sections first, contiguity gaps as fallback.
+//
+//  1. Section labels (git's function-context, trimmed) discriminate when at
+//     least two distinct non-empty labels exist. Hunks with no label inherit
+//     the NEXT hunk's label (imports precede the code that needs them).
+//     Nearby hunks in one section stay together -- same-function changes are
+//     usually one idea.
+//  2. When labels cannot discriminate (config files, plain text, top-level
+//     code), hunks separated by more than sectionGapThreshold unchanged
+//     lines become separate groups labeled by their line span. Non-adjacent
+//     regions of a sectionless file are usually separate ideas.
+//
+// The grouping is a draft heuristic for hc plan / hc split --hunks; the
+// reviewing agent merges or refines it.
 func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
 	if len(hunks) < 2 {
 		return nil
 	}
+
 	labels := make([]string, len(hunks))
+	distinct := map[string]bool{}
 	next := ""
 	for i := len(hunks) - 1; i >= 0; i-- {
 		if s := sectionLabel(hunks[i].Section); s != "" {
@@ -178,18 +201,64 @@ func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
 		}
 		labels[i] = next
 	}
-
-	var groups []hunkGroup
-	pos := map[string]int{}
-	for i, h := range hunks {
-		if gi, ok := pos[labels[i]]; ok {
-			groups[gi].indices = append(groups[gi].indices, h.Index)
-			continue
+	for _, l := range labels {
+		if l != "" {
+			distinct[l] = true
 		}
-		pos[labels[i]] = len(groups)
-		groups = append(groups, hunkGroup{section: labels[i], indices: []int{h.Index}})
 	}
-	return groups
+
+	// Tier 1: sections discriminate.
+	if len(distinct) >= 2 {
+		var groups []hunkGroup
+		pos := map[string]int{}
+		for i, h := range hunks {
+			if gi, ok := pos[labels[i]]; ok {
+				groups[gi].indices = append(groups[gi].indices, h.Index)
+				continue
+			}
+			pos[labels[i]] = len(groups)
+			groups = append(groups, hunkGroup{section: labels[i], indices: []int{h.Index}})
+		}
+		return groups
+	}
+
+	// Tier 2: gap-based fallback for undiscriminating labels.
+	if len(hunks) > maxGapSplitHunks {
+		return nil // scattered-many pattern: almost certainly one mechanical change
+	}
+	var groups [][]diff.Hunk
+	for i, h := range hunks {
+		if i > 0 {
+			prev := hunks[i-1]
+			prevEnd := prev.OldStart
+			if prev.OldCount > 0 {
+				prevEnd = prev.OldStart + prev.OldCount - 1
+			}
+			if h.OldStart-prevEnd > sectionGapThreshold {
+				groups = append(groups, nil)
+			}
+		} else {
+			groups = append(groups, nil)
+		}
+		groups[len(groups)-1] = append(groups[len(groups)-1], h)
+	}
+	if len(groups) < 2 {
+		return nil
+	}
+	out := make([]hunkGroup, 0, len(groups))
+	for _, g := range groups {
+		first, last := g[0], g[len(g)-1]
+		end := last.OldStart
+		if last.OldCount > 0 {
+			end = last.OldStart + last.OldCount - 1
+		}
+		hg := hunkGroup{section: fmt.Sprintf("lines %d-%d", first.OldStart, end)}
+		for _, h := range g {
+			hg.indices = append(hg.indices, h.Index)
+		}
+		out = append(out, hg)
+	}
+	return out
 }
 
 // sectionLabel trims a raw function-context line down to a short label.
