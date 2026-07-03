@@ -67,6 +67,7 @@ func NewRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable colors")
 
 	root.AddCommand(newDiffCmd())
+	root.AddCommand(newPlanCmd())
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newLogCmd())
 	root.AddCommand(newSplitCmd())
