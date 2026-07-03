@@ -10,6 +10,7 @@ Hunk-based atomic commits for AI agents. One JSON plan, N commits. You assign hu
 ## Activation
 
 This skill activates when:
+- A unit of work (one change + its passing test) is completed -- commit BEFORE starting the next unit, not at the end of the whole task
 - The agent needs to create atomic commits from uncommitted changes
 - The user asks for hunk-level commit granularity
 - The agent has written multiple logical changes (e.g., several tests, feature + test, refactor + fix)
@@ -109,8 +110,19 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - **Do NOT put untracked paths into `allow_unplanned` or into commits "to satisfy coverage".** Coverage validation only covers files with hunks in the diff. Entries in the top-level `untracked` array require NOTHING from you; reference one only when you actually want that new file committed. If you think hc demanded an untracked file, re-read the error -- it was about a different (tracked or intent-to-add) file.
 - **Do NOT run `git diff`, `git add`, or `git commit` alongside hc.** `hc diff --json` has everything; `hc run` does all staging.
 - **Do NOT re-run `hc diff` between commits of one plan.** One read, one plan, one run.
+- **Do NOT batch the whole task and commit once at the end.** Commit after every completed unit (change + green test); stacked uncommitted edits fuse into inseparable hunks.
+- **Do NOT defer test-writing to the end of the task.** The test belongs to the unit it covers, written right after the change.
 - **Do NOT bundle same-kind work across files** ("add tests for X, Y and Z" in one commit). Unless it is a mechanical sweep or an inseparable change, every file is its own commit.
 - **Do NOT write `hunks: [all indices]` (or omit `hunks`) for a multi-hunk file without reading each hunk's `section`/`content`.** This is the most common under-split. Start from `hc plan` instead -- it pre-splits by section -- and treat `hc run`'s `review granularity` warning as a prompt to re-check.
+
+## Commit Cadence -- commit as you work, not at the end
+
+Agents batch an entire task and commit once at the end -- sometimes 20+ changed files deep. Do not. Beyond review pain, deferring commits **destroys splittability mechanically**: edits made on top of uncommitted edits in the same region FUSE into one hunk. Two ideas that touch nearby lines become a single inseparable hunk that no tool can pull apart afterwards. Committing between ideas is the only moment separation is free.
+
+- **The unit of work is: one change + its test passing.** When a unit is done, STOP and commit it (as its granular commits: feat + test per the rules below) before starting the next unit.
+- **Write the test immediately after the change it covers** -- while the context is fresh -- never as an end-of-task batch. The unit is not done until its test is green.
+- **Overdue check:** if `hc diff --json` shows changes in more than ~5 files (or a file has accumulated hunks from more than one idea), you have waited too long. Commit the completed units now; keep only the in-progress one uncommitted.
+- Long refactors/sweeps are still ONE unit (one commit at their natural end) -- cadence does not mean fragmenting a mechanical change.
 
 ## Commit Granularity -- the most important rule
 
