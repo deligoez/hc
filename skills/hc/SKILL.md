@@ -51,7 +51,7 @@ PLAN
 
 Each hunk in `hc diff --json` carries what you need to classify it -- never guess from headers alone:
 
-- `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines.
+- `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines. Very large hunks (>100 lines) arrive capped to a head/tail sample with `content_truncated: true` and `content_omitted_lines` -- the counts and fingerprint still identify the hunk; you almost never need the elided middle.
 - `section` -- the enclosing function/context from git (which function does this hunk touch?).
 - Per-file `sections` -- the distinct sections the file's hunks touch, in order. **More than one entry = probably more than one idea**: plan hunk-level splits.
 - **Signal hierarchy for "is this one idea?":** different files > different sections > distant regions. Non-adjacent changes are separate hunks and therefore split CANDIDATES -- nearby hunks in the SAME section are usually one idea, but far-apart regions in a sectionless file (configs, docs, top-level code) usually are not. `hc plan` encodes exactly this: sections first, then a ~8-unchanged-line gap fallback (skipped for scattered-many files like lockfiles, which are one mechanical change).
