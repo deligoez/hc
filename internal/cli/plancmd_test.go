@@ -268,3 +268,39 @@ func TestPlainTextFilesUseGapFallback(t *testing.T) {
 		t.Fatalf("gap groups should be labeled by line span: %q", draft.Commits[0].Message)
 	}
 }
+
+// TestPlanDraftLabelsTestFiles verifies test files get "TODO test" draft
+// entries (tracked and untracked) while non-test files keep plain "TODO".
+func TestPlanDraftLabelsTestFiles(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+
+	must(t, os.WriteFile(filepath.Join(dir, "auth.go"), []byte("package m\n\nfunc a() {}\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "auth_test.go"), []byte("package m\n\nfunc TestA(t *T) {}\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+
+	must(t, os.WriteFile(filepath.Join(dir, "auth.go"), []byte("package m\n\nfunc a() { _ = 1 }\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "auth_test.go"), []byte("package m\n\nfunc TestA(t *T) { _ = 1 }\n"), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "handler.spec.ts"), []byte("it('x', () => {})\n"), 0o644))
+
+	result, err := runDiff(r)
+	must(t, err)
+	draft, hasTests := buildDraftPlan(result)
+	if !hasTests {
+		t.Fatalf("hasTestEntries = false, want true")
+	}
+	byPath := map[string]string{}
+	for _, c := range draft.Commits {
+		byPath[c.Files[0].Path] = c.Message
+	}
+	if !strings.HasPrefix(byPath["auth.go"], "TODO (") {
+		t.Errorf("auth.go message = %q, want plain TODO", byPath["auth.go"])
+	}
+	if !strings.HasPrefix(byPath["auth_test.go"], "TODO test (") {
+		t.Errorf("auth_test.go message = %q, want TODO test", byPath["auth_test.go"])
+	}
+	if !strings.HasPrefix(byPath["handler.spec.ts"], "TODO test (new file ") {
+		t.Errorf("handler.spec.ts message = %q, want TODO test (new file ...)", byPath["handler.spec.ts"])
+	}
+}
