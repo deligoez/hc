@@ -28,10 +28,10 @@ hc diff --json
 hc plan > draft.json
 ```
 
-`hc plan` emits the finest mechanical split: one commit per file, split further by enclosing section when a file's hunks span several. Every message is a `TODO (...)` placeholder and **`hc run` refuses TODO messages**, so each entry must be reviewed. Your review job, per entry:
+`hc plan` emits the finest mechanical split: one commit per file, split further by enclosing section when a file's hunks span several. Test files (by filename/directory convention) are labeled `TODO test (...)` -- those entries follow the test rules below: one commit per NEW test, never merged. Every message is a `TODO (...)` placeholder and **`hc run` refuses TODO messages**, so each entry must be reviewed. Your review job, per entry:
 
 1. **Write a real commit message.** While writing it, sanity-check the entry is one idea.
-2. **MERGE entries that belong together** -- mechanical sweeps, inseparable changes, one idea that happens to span sections. Merging is a conscious act; splitting is the default you inherit.
+2. **MERGE entries that belong together** -- mechanical sweeps, inseparable changes, one idea that happens to span sections. Merging is a conscious act; splitting is the default you inherit. Never merge `TODO test` entries for separate new tests.
 3. **Drop untracked entries** you don't want committed.
 
 ```bash
