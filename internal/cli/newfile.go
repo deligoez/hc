@@ -6,6 +6,7 @@ import (
 
 	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
+	"github.com/deligoez/hc/internal/plan"
 )
 
 // A brand-new file arrives as ONE whole-file addition hunk, so it could never
@@ -45,42 +46,64 @@ func expandNewFileHunks(runner *git.Runner, files []diff.FileDiff) {
 	}
 }
 
-// splitAdditionBySection cuts one whole-file insertion hunk into per-section
 // insertion hunks. Returns nil when sections cannot discriminate (fewer than
 // two function-like groups).
+//
+// Three refinements keep intermediate commits meaningful:
+//   - In TEST files (per isTestFile) only test-like functions open groups;
+//     helpers, setUp and other support functions fold into the group before
+//     them, so the split is per-TEST, not per-function.
+//   - Decoration lines immediately above a declaration (attributes like
+//     #[Test], docblocks, comments) ride with the function they decorate.
+//   - A trailing closing scaffold (lines less indented than the last
+//     declaration -- a class's closing brace) is carved into its own final
+//     hunk, labeled "closing scaffold". Committing it FIRST keeps every
+//     intermediate file syntactically closed: later hunks insert their
+//     lines before it by construction.
 func splitAdditionBySection(runner *git.Runner, path string, h diff.Hunk) []diff.Hunk {
 	sections, err := detectLineSections(runner, path, h.Lines)
 	if err != nil {
 		return nil
 	}
+	testFile := isTestFile(path)
 
 	// Group boundaries open at lines whose enclosing section is a NEW
 	// function-like declaration; everything before the first boundary
 	// (package/imports/class scaffold) rides with the first group.
 	type span struct {
-		start   int // 0-based first line index
-		section string
+		start     int // 0-based first line index (after decoration walk-back)
+		declStart int // 0-based declaration line index
+		section   string
 	}
 	var spans []span
 	current := ""
 	for k, sec := range sections {
-		if sec != current && isFunctionSection(sec) {
-			current = sec
-			spans = append(spans, span{start: k, section: sec})
+		if sec == current || !isFunctionSection(sec) {
+			continue
 		}
+		current = sec
+		start := decorationStart(h.Lines, k)
+		if testFile && !isTestFunction(sec, h.Lines, start, k) {
+			continue // helper/support function: fold into the previous group
+		}
+		spans = append(spans, span{start: start, declStart: k, section: sec})
 	}
 	if len(spans) < 2 {
 		return nil
 	}
 	spans[0].start = 0 // preamble rides with the first function
 
-	hunks := make([]diff.Hunk, 0, len(spans))
+	// Carve the trailing closing scaffold: the suffix of lines less indented
+	// than the last declaration (e.g. a class's closing brace).
+	trailerStart := trailingScaffoldStart(h.Lines, spans[len(spans)-1].declStart)
+
+	hunks := make([]diff.Hunk, 0, len(spans)+1)
 	for i, sp := range spans {
-		end := len(h.Lines)
+		end := trailerStart
 		if i+1 < len(spans) {
 			end = spans[i+1].start
 		}
-		nh := diff.Hunk{
+		hunks = append(hunks, diff.Hunk{
 			Index:    i,
 			OldStart: 0,
 			OldCount: 0,
@@ -88,10 +111,132 @@ func splitAdditionBySection(runner *git.Runner, path string, h diff.Hunk) []diff
 			NewCount: int64(end - sp.start),
 			Section:  sp.section,
 			Lines:    h.Lines[sp.start:end],
-		}
-		hunks = append(hunks, nh)
+		})
+	}
+	if trailerStart < len(h.Lines) {
+		hunks = append(hunks, diff.Hunk{
+			Index:    len(spans),
+			OldStart: 0,
+			OldCount: 0,
+			NewStart: int64(trailerStart + 1),
+			NewCount: int64(len(h.Lines) - trailerStart),
+			Section:  trailerSectionLabel,
+			Lines:    h.Lines[trailerStart:],
+		})
 	}
 	return hunks
+}
+
+// trailerSectionLabel marks the synthetic closing-scaffold hunk of an
+// expanded new file. Assign it to the FIRST replacement commit: every
+// intermediate file then stays syntactically closed, because later hunks
+// insert their lines before it (reconstruction is by original coordinates).
+const trailerSectionLabel = "closing scaffold"
+
+// trailingScaffoldStart returns the 0-based index where the file's trailing
+// closing scaffold begins: the maximal suffix of blank lines and lines less
+// indented than the last declaration. len(lines) means "no trailer" --
+// column-0 declarations (Go, C, Python) end up here, and their files are
+// already valid without one.
+func trailingScaffoldStart(lines []diff.Line, lastDecl int) int {
+	declIndent := indentWidth(lines[lastDecl].Content)
+	if declIndent == 0 {
+		return len(lines)
+	}
+	start := len(lines)
+	for k := len(lines) - 1; k > lastDecl; k-- {
+		text := strings.TrimRight(lines[k].Content, "\r\n")
+		if strings.TrimSpace(text) != "" && indentWidth(text) >= declIndent {
+			break
+		}
+		start = k
+	}
+	return start
+}
+
+// indentWidth counts leading whitespace, tabs weighted as 4 columns.
+func indentWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		switch r {
+		case ' ':
+			w++
+		case '\t':
+			w += 4
+		default:
+			return w
+		}
+	}
+	return w
+}
+
+// decorationStart walks back from a declaration line over the decoration
+// lines immediately above it -- attributes (#[Test]), annotations (@Test),
+// docblock/comment lines -- and returns where the function's block really
+// starts. Blank lines stop the walk.
+func decorationStart(lines []diff.Line, decl int) int {
+	start := decl
+	for k := decl - 1; k >= 0; k-- {
+		if !isDecorationLine(lines[k].Content) {
+			break
+		}
+		start = k
+	}
+	return start
+}
+
+// isDecorationLine reports whether a line is attribute/annotation/comment
+// decoration that belongs to the declaration below it.
+func isDecorationLine(content string) bool {
+	s := strings.TrimSpace(strings.TrimRight(content, "\r\n"))
+	if s == "" {
+		return false
+	}
+	for _, p := range []string{"#[", "@", "/**", "/*", "*/", "*", "//", "'''", "\"\"\""} {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTestFunction reports whether a declaration in a test file is an actual
+// test: its name matches a test-naming convention, or a decoration line
+// directly above it carries a test attribute/annotation.
+func isTestFunction(section string, lines []diff.Line, start, decl int) bool {
+	name := strings.ToLower(funcNameOf(section))
+	switch {
+	case strings.HasPrefix(name, "test"),
+		strings.HasPrefix(name, "should"),
+		strings.HasPrefix(name, "spec_"),
+		strings.HasPrefix(name, "benchmark"),
+		strings.HasPrefix(name, "example"),
+		strings.HasPrefix(name, "fuzz"),
+		name == "it", strings.HasPrefix(name, "it_"):
+		return true
+	}
+	for k := start; k < decl; k++ {
+		s := strings.ToLower(lines[k].Content)
+		for _, marker := range []string{"#[test", "@test", "[fact]", "[theory]"} {
+			if strings.Contains(s, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// funcNameOf extracts the bare function name from a raw funcname line:
+// everything before the parameter list, last whitespace-separated field.
+func funcNameOf(section string) string {
+	s := section
+	if i := strings.Index(s, "("); i >= 0 {
+		s = s[:i]
+	}
+	if fields := strings.Fields(s); len(fields) > 0 {
+		return fields[len(fields)-1]
+	}
+	return ""
 }
 
 // newFileMarker is appended to lines when probing sections; it only needs to
@@ -210,4 +355,44 @@ func isFunctionSection(s string) bool {
 		return false
 	}
 	return true
+}
+
+// isExpandedNewFile reports whether a new file's hunks are synthetic
+// per-section expansions (multiple pure-insertion hunks).
+func isExpandedNewFile(fd *diff.FileDiff) bool {
+	if len(fd.Hunks) < 2 {
+		return false
+	}
+	for _, h := range fd.Hunks {
+		if h.OldCount != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// newFileSplitCommits builds the draft replacement commits for an expanded
+// new file: one commit per section, with the closing-scaffold hunk riding in
+// the FIRST commit so every intermediate file stays syntactically closed
+// (later hunks insert before it by original-coordinate reconstruction).
+func newFileSplitCommits(template, subject string, fd diff.FileDiff) []plan.Commit {
+	trailer := -1
+	if last := fd.Hunks[len(fd.Hunks)-1]; last.Section == trailerSectionLabel {
+		trailer = last.Index
+	}
+	var commits []plan.Commit
+	for i, h := range fd.Hunks {
+		if h.Index == trailer {
+			continue
+		}
+		indices := []int{h.Index}
+		if i == 0 && trailer >= 0 {
+			indices = append(indices, trailer)
+		}
+		commits = append(commits, plan.Commit{
+			Message: renderSplitMessage(template, subject, fd.Path, sectionLabel(h.Section)),
+			Files:   []plan.FileEntry{{Path: fd.Path, Hunks: indices}},
+		})
+	}
+	return commits
 }
