@@ -300,3 +300,35 @@ func TestTrailingScaffoldHeuristic(t *testing.T) {
 		t.Errorf("nested trailer start = %d, want 4", got)
 	}
 }
+
+// TestIsTestFunctionHeuristic covers test-vs-helper classification: naming
+// conventions and test attributes/annotations above the declaration.
+func TestIsTestFunctionHeuristic(t *testing.T) {
+	attr := []diff.Line{{Op: diff.OpAdd, Content: "    #[Test]\n"}, {Op: diff.OpAdd, Content: "    public function calculates(): void\n"}}
+	doc := []diff.Line{{Op: diff.OpAdd, Content: "    /** @test */\n"}, {Op: diff.OpAdd, Content: "    public function calculates(): void\n"}}
+	plain := []diff.Line{{Op: diff.OpAdd, Content: "    private function makeProduct(): array\n"}}
+
+	cases := []struct {
+		section     string
+		lines       []diff.Line
+		start, decl int
+		want        bool
+	}{
+		{"func TestCreate(t *testing.T) {", plain, 0, 0, true},
+		{"public function it_stores_an_order(): void", plain, 0, 0, true},
+		{"def test_models(self):", plain, 0, 0, true},
+		{"public function should_reject(): void", plain, 0, 0, true},
+		{"func BenchmarkParse(b *testing.B) {", plain, 0, 0, true},
+		{"public function calculates(): void", attr, 0, 1, true},
+		{"public function calculates(): void", doc, 0, 1, true},
+		{"private function makeProduct(): array", plain, 0, 0, false},
+		{"protected function setUp(): void", plain, 0, 0, false},
+		{"public function calculates(): void", plain, 0, 0, false},
+		{"private function iterate(): void", plain, 0, 0, false},
+	}
+	for _, c := range cases {
+		if got := isTestFunction(c.section, c.lines, c.start, c.decl); got != c.want {
+			t.Errorf("isTestFunction(%q) = %v, want %v", c.section, got, c.want)
+		}
+	}
+}
