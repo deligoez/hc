@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/deligoez/hc/internal/git"
 )
 
 const newFileGoTests = `package m
@@ -152,5 +154,87 @@ func TestIsFunctionSectionHeuristic(t *testing.T) {
 		if got := isFunctionSection(c.section); got != c.want {
 			t.Errorf("isFunctionSection(%q) = %v, want %v", c.section, got, c.want)
 		}
+	}
+}
+
+const newFilePHPTests = `<?php
+
+namespace Tests\Machines;
+
+use PHPUnit\Framework\Attributes\Test;
+use Tests\TestCase;
+
+class StoreOrderActionTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+    }
+
+    private function makeProduct(): array
+    {
+        return ['id' => 1];
+    }
+
+    #[Test]
+    public function it_stores_an_order(): void
+    {
+        $this->assertTrue(true);
+    }
+
+    private function runAction(): void
+    {
+    }
+
+    #[Test]
+    public function it_fires_the_event(): void
+    {
+        $this->assertTrue(true);
+    }
+}
+`
+
+// phpTestRepo commits newFilePHPTests as a brand-new file (with the php diff
+// driver enabled) and returns the repo runner.
+func phpTestRepo(t *testing.T) *git.Runner {
+	t.Helper()
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.php diff=php\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+	must(t, os.MkdirAll(filepath.Join(dir, "tests"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "tests/StoreOrderActionTest.php"), []byte(newFilePHPTests), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "test: add StoreOrderActionTest"))
+	return r
+}
+
+// TestNewFilePerTestGrouping verifies the PHP shape from production: helpers
+// and setUp fold into the preceding group, #[Test] attributes ride with their
+// test, and the class's closing brace becomes a "closing scaffold" hunk.
+func TestNewFilePerTestGrouping(t *testing.T) {
+	r := phpTestRepo(t)
+	result, acErr := runLog(r, "HEAD~1..HEAD", false)
+	if acErr != nil {
+		t.Fatalf("runLog: %v", acErr)
+	}
+	hunks := result.Commits[0].Files[0].Hunks
+	if len(hunks) != 3 {
+		t.Fatalf("want 2 per-test hunks + closing scaffold, got %d: %+v", len(hunks), hunks)
+	}
+	if !strings.Contains(hunks[0].Section, "it_stores_an_order") ||
+		!strings.Contains(hunks[1].Section, "it_fires_the_event") ||
+		hunks[2].Section != "closing scaffold" {
+		t.Fatalf("sections wrong: %q / %q / %q", hunks[0].Section, hunks[1].Section, hunks[2].Section)
+	}
+	if !strings.Contains(hunks[0].Content, "setUp") || !strings.Contains(hunks[0].Content, "makeProduct") {
+		t.Errorf("helpers before the first test must fold into it:\n%s", hunks[0].Content)
+	}
+	if !strings.HasPrefix(strings.TrimPrefix(hunks[1].Content, "+"), "    #[Test]") {
+		t.Errorf("the #[Test] attribute must ride with its test, got:\n%s", hunks[1].Content)
+	}
+	if !strings.Contains(hunks[0].Content, "runAction") {
+		t.Errorf("a helper between tests must fold into the preceding group:\n%s", hunks[0].Content)
 	}
 }
