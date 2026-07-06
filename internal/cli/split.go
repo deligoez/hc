@@ -109,6 +109,10 @@ func runSplit(runner *git.Runner, rangeArg, template string, hunksMode bool) (*p
 		rw := plan.Rewrite{Commit: shortSHA(ci.SHA)}
 		for _, fd := range files {
 			if hunksMode && !fd.IsBinary && !fd.IsDeleted {
+				if fd.IsNew && isExpandedNewFile(&fd) {
+					rw.Commits = append(rw.Commits, newFileSplitCommits(template, subject, fd)...)
+					continue
+				}
 				if groups := groupHunksBySection(fd.Hunks); len(groups) > 1 {
 					for _, g := range groups {
 						rw.Commits = append(rw.Commits, plan.Commit{
