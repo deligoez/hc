@@ -64,3 +64,42 @@ func TestNewFileLogSplitsPerTestFunction(t *testing.T) {
 			hunks[0].Added, hunks[1].Added, hunks[2].Added)
 	}
 }
+
+// TestNewFileRewritePerTest splits a committed new test file into per-test
+// commits via runRewrite and verifies the tree invariant plus intermediate
+// content: each replacement appends exactly one test.
+func TestNewFileRewritePerTest(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("s\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+	must(t, os.WriteFile(filepath.Join(dir, "order_test.go"), []byte(newFileGoTests), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "test: add order tests"))
+	sha, err := r.ResolveSHA("HEAD")
+	must(t, err)
+
+	planJSON := `{"rewrites":[{"commit":"` + sha + `","commits":[
+		{"message":"test: add TestCreate","files":[{"path":"order_test.go","hunks":[0]}]},
+		{"message":"test: add TestUpdate","files":[{"path":"order_test.go","hunks":[1]}]},
+		{"message":"test: add TestDelete","files":[{"path":"order_test.go","hunks":[2]}]}]}]}`
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
+	if acErr != nil {
+		t.Fatalf("runRewrite: %v | %s", acErr, acErr.Hint)
+	}
+	if !res.TreeIdentical || res.Summary.Replacements != 3 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+
+	after1, err := r.Run("show", "HEAD~2:order_test.go")
+	must(t, err)
+	if !strings.Contains(after1, "TestCreate") || strings.Contains(after1, "TestUpdate") {
+		t.Errorf("first replacement should contain only TestCreate:\n%s", after1)
+	}
+	final, err := r.Run("show", "HEAD:order_test.go")
+	must(t, err)
+	if final != newFileGoTests {
+		t.Errorf("final content must be byte-identical to the original")
+	}
+}
