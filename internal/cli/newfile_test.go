@@ -126,3 +126,31 @@ func TestNewFilePlainTextStaysWhole(t *testing.T) {
 		t.Fatalf("plain text must stay one hunk, got %d", len(hunks))
 	}
 }
+
+// TestIsFunctionSectionHeuristic covers the boundary filter: function-like
+// declarations open groups, scaffold contexts do not.
+func TestIsFunctionSectionHeuristic(t *testing.T) {
+	cases := []struct {
+		section string
+		want    bool
+	}{
+		{"func TestCreate(t *testing.T) {", true},
+		{"public function test_it_stores(): void", true},
+		{"def test_models(self):", true},
+		{"it('stores the order', () => {", true},
+		{"static int parse(const char *s)", true},
+		{"package m", false},
+		{"import (", false},
+		{"use Tests\\TestCase;", false},
+		{"class StoreOrderActionTest extends TestCase", false},
+		{"type Config struct {", false},
+		{"const (", false},
+		{"if err != nil {", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := isFunctionSection(c.section); got != c.want {
+			t.Errorf("isFunctionSection(%q) = %v, want %v", c.section, got, c.want)
+		}
+	}
+}
