@@ -109,6 +109,7 @@ func runLog(runner *git.Runner, rangeArg string, filesOnly bool) (*logOutputJSON
 			return nil, output.NewExecutionError(
 				fmt.Sprintf("cannot parse diff of %s: %v", sha, err), "")
 		}
+		expandNewFileHunks(runner, files)
 		for i := range files {
 			if filesOnly {
 				jf := diffFileJSON{
