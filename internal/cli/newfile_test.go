@@ -332,3 +332,55 @@ func TestIsTestFunctionHeuristic(t *testing.T) {
 		}
 	}
 }
+
+// TestNewFileLongDeclarationNames reproduces the production failure: test
+// names so long that the parameter list falls beyond git's ~80-byte funcname
+// excerpt. The marker probe must still produce stable per-line sections
+// (truncation-safe keys) and the keyword fallback must still open groups.
+func TestNewFileLongDeclarationNames(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.php diff=php\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+	content := `<?php
+
+class TerminateOtherApplicationsActionTest extends TestCase
+{
+    public function it_terminates_only_other_terminable_car_sales_applications_of_the_same_farmer(): void
+    {
+        $this->assertTrue(true);
+        $this->assertTrue(true);
+        $this->assertTrue(true);
+    }
+
+    public function it_does_not_terminate_applications_of_other_farmers_with_very_long_name_too(): void
+    {
+        $this->assertFalse(false);
+    }
+}
+`
+	must(t, os.MkdirAll(filepath.Join(dir, "tests"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "tests/TerminateTest.php"), []byte(content), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "test: add TerminateTest"))
+
+	result, acErr := runLog(r, "HEAD~1..HEAD", false)
+	if acErr != nil {
+		t.Fatalf("runLog: %v", acErr)
+	}
+	hunks := result.Commits[0].Files[0].Hunks
+	if len(hunks) != 3 {
+		t.Fatalf("want 2 per-test hunks + closing scaffold, got %d: %+v", len(hunks), hunks)
+	}
+	for _, h := range hunks {
+		if h.Added < 1 {
+			t.Fatalf("degenerate zero-length hunk: %+v", h)
+		}
+	}
+	if !strings.Contains(hunks[0].Section, "it_terminates_only") ||
+		!strings.Contains(hunks[1].Section, "it_does_not_terminate") ||
+		hunks[2].Section != "closing scaffold" {
+		t.Fatalf("sections wrong: %q / %q / %q", hunks[0].Section, hunks[1].Section, hunks[2].Section)
+	}
+}
