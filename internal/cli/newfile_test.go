@@ -384,3 +384,17 @@ class TerminateOtherApplicationsActionTest extends TestCase
 		t.Fatalf("sections wrong: %q / %q / %q", hunks[0].Section, hunks[1].Section, hunks[2].Section)
 	}
 }
+
+// TestSectionLabelSurvivesExcerptCap guards the label path against git's
+// ~80-byte funcname truncation: a long declaration that lost its parameter
+// list must still yield its (truncated) name, not an empty label -- otherwise
+// split messages collapse to duplicate "(basename)" forms.
+func TestSectionLabelSurvivesExcerptCap(t *testing.T) {
+	truncated := "public function it_terminates_only_other_terminable_car_sales_applica"
+	if got := sectionLabel(truncated); got != "it_terminates_only_other_terminable_car_sales_applica" {
+		t.Errorf("sectionLabel(truncated) = %q, want the truncated test name", got)
+	}
+	if got := sectionLabel("Some long prose line that mentions nothing declaration-like at all, really truly"); got != "" {
+		t.Errorf("prose must still yield no label, got %q", got)
+	}
+}
