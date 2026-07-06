@@ -141,7 +141,7 @@ Everything else splits:
 - **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit.
 - **Tests are ALWAYS their own commits, one commit per NEW test.** A change and its test never share a commit -- the test commit follows immediately after the code commit it covers. Every newly written test function is its own commit, even when several live in the same file (classify each test hunk by its `section` -- the test function name): N new tests = N commits. The one softening: MODIFICATIONS to existing tests may share a commit when a single context drives them (e.g. one behavior change forces updates across several existing tests) -- new tests never ride along with those either.
 - **The litmus tests:** (a) would the commit message still be accurate for each file alone? Then each file is its own commit. (b) Could `git revert` of this commit undo exactly one decision?
-- **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
+- **New files can't be hunk-split in the WORKING TREE.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them. (Once committed, `hc log`/`hc split --hunks`/`hc rewrite` CAN split a new file per section -- see below -- but authoring in passes is still the cleaner path.)
 
 **History size is NEVER a problem -- internalize this.** Do not fear high commit counts: 30 one-file commits are better than 6 bundles, and 10 single-test commits are better than one `test: add tests` blob. There is no such thing as "too many commits" from correct splitting; hc executes large plans cheaply. When torn between merging and splitting, ALWAYS split.
 
@@ -251,6 +251,12 @@ hc rewrite plan.json
   {"message": "fix: edit B",  "files": [{"path": "f.go", "hunks": [1, 2]}]}
 ]}]}
 ```
+
+**New files split per section too.** A commit that ADDED a whole file (e.g. a fresh test suite committed in one go) is not stuck as one hunk: `hc log --json` exposes the file as per-section synthetic hunks (one per detected function, preamble riding with the first), `hc split --hunks` proposes one commit per section, and `hc rewrite` stages any subset -- so "one commit per NEW test" is enforceable retroactively on freshly-authored branches. Notes:
+
+- Section detection uses git's own funcname machinery, so languages whose functions git only recognizes via a diff driver (indented methods: PHP, Ruby, ...) need the usual `.gitattributes` line (e.g. `*.php diff=php`) -- the same requirement ordinary diff sections have. Without it the file stays one hunk.
+- Selecting all of a new file's hunks reproduces the original content byte-for-byte (tree identity is still verified); intermediate commits contain the file with only the selected functions, which may not compile for languages where the closing scaffold sits on the last line -- acceptable for rewrite (the final tree is what CI sees), just don't bisect into the middle of such a split.
+- Plain-text/config new files (no function-like sections) keep their single whole-file hunk.
 
 Rules:
 
