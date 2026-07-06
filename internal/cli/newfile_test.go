@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deligoez/hc/internal/diff"
 	"github.com/deligoez/hc/internal/git"
 )
 
@@ -269,5 +270,33 @@ func TestNewFileRewriteValidIntermediates(t *testing.T) {
 	must(t, err)
 	if final != newFilePHPTests {
 		t.Errorf("final content must be byte-identical to the original")
+	}
+}
+
+// TestTrailingScaffoldHeuristic covers the indentation-based trailer cut:
+// suffix lines less indented than the last declaration are scaffold;
+// column-0 declarations produce no trailer.
+func TestTrailingScaffoldHeuristic(t *testing.T) {
+	mk := func(texts ...string) []diff.Line {
+		lines := make([]diff.Line, len(texts))
+		for i, s := range texts {
+			lines[i] = diff.Line{Op: diff.OpAdd, Content: s + "\n"}
+		}
+		return lines
+	}
+	// Indented method, class brace at column 0: trailer = final brace.
+	phpish := mk("class C {", "    function test_a() {", "        x;", "    }", "}")
+	if got := trailingScaffoldStart(phpish, 1); got != 4 {
+		t.Errorf("phpish trailer start = %d, want 4", got)
+	}
+	// Column-0 declaration (Go): no trailer.
+	goish := mk("func TestA() {", "\tx()", "}")
+	if got := trailingScaffoldStart(goish, 0); got != 3 {
+		t.Errorf("goish trailer start = %d, want 3 (no trailer)", got)
+	}
+	// Nested closers (namespace + class) are all scaffold.
+	nested := mk("namespace N {", "  class C {", "    void test_a() {", "    }", "  }", "}")
+	if got := trailingScaffoldStart(nested, 2); got != 4 {
+		t.Errorf("nested trailer start = %d, want 4", got)
 	}
 }
