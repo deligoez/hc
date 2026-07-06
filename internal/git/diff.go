@@ -15,6 +15,12 @@ func (r *Runner) DiffFile(path string, flags ...string) (string, error) {
 	return r.Run(args...)
 }
 
+// DiffTrees returns the -U0 diff between two tree objects. Running inside the
+// repository keeps path-based diff attributes (funcname drivers) in effect.
+func (r *Runner) DiffTrees(a, b string) (string, error) {
+	return r.Run("diff", "-U0", "--no-renames", "--no-ext-diff", a, b)
+}
+
 // IsUntracked checks if a file is untracked (not ignored).
 func (r *Runner) IsUntracked(path string) (bool, error) {
 	out, err := r.Run("ls-files", "--others", "--exclude-standard", "--", path)
