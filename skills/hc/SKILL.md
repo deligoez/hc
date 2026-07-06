@@ -113,13 +113,14 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - **Do NOT batch the whole task and commit once at the end.** Commit after every completed unit (change + green test); stacked uncommitted edits fuse into inseparable hunks.
 - **Do NOT defer test-writing to the end of the task.** The test belongs to the unit it covers, written right after the change.
 - **Do NOT bundle same-kind work across files** ("add tests for X, Y and Z" in one commit). Unless it is a mechanical sweep or an inseparable change, every file is its own commit.
+- **Do NOT bundle a change and its test into one commit, and do NOT bundle unrelated tests into one `test:` commit.** Tests are always separate commits; tests for different behaviors are separate commits from each other (per-test-function via `section`). "It would bloat the history" is never a reason to merge -- history size is not a problem.
 - **Do NOT write `hunks: [all indices]` (or omit `hunks`) for a multi-hunk file without reading each hunk's `section`/`content`.** This is the most common under-split. Start from `hc plan` instead -- it pre-splits by section -- and treat `hc run`'s `review granularity` warning as a prompt to re-check.
 
 ## Commit Cadence -- commit as you work, not at the end
 
 Agents batch an entire task and commit once at the end -- sometimes 20+ changed files deep. Do not. Beyond review pain, deferring commits **destroys splittability mechanically**: edits made on top of uncommitted edits in the same region FUSE into one hunk. Two ideas that touch nearby lines become a single inseparable hunk that no tool can pull apart afterwards. Committing between ideas is the only moment separation is free.
 
-- **The unit of work is: one change + its test passing.** When a unit is done, STOP and commit it (as its granular commits: feat + test per the rules below) before starting the next unit.
+- **The unit of work is: one change + its test passing.** When a unit is done, STOP and commit it -- as SEPARATE commits: one code commit (`feat`/`fix`/...), then its `test` commit -- before starting the next unit.
 - **Write the test immediately after the change it covers** -- while the context is fresh -- never as an end-of-task batch. The unit is not done until its test is green.
 - **Overdue check:** if `hc diff --json` shows changes in more than ~5 files (or a file has accumulated hunks from more than one idea), you have waited too long. Commit the completed units now; keep only the in-progress one uncommitted.
 - Long refactors/sweeps are still ONE unit (one commit at their natural end) -- cadence does not mean fragmenting a mechanical change.
@@ -138,17 +139,18 @@ Everything else splits:
 - **Same KIND of change across files is not a sweep.** "Fork the Store* action tests" over 9 files is 9 commits (`test: fork StoreOrderAction test`, `test: fork StorePaymentAction test`, ...) -- each file reviews and reverts on its own. A sweep transforms existing lines mechanically; writing/forking N distinct files is N pieces of work.
 - **Split within a file too -- the most-skipped rule.** If a file's hunks carry separable ideas, give each its own commit. Check the file's `sections` array first: more than one section usually means more than one idea. Worked example: a state-machine file with 5 hunks across `region`, `isReadyForSubmission` and a new endpoint = 3 commits (imports ride with the code that needs them), NOT `"hunks": [0,1,2,3,4]` in one.
 - **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit.
+- **Tests are ALWAYS their own commits.** A change and its test never share a commit -- the test commit follows immediately after the code commit it covers. And unrelated tests never share a commit either: tests exercising different behaviors get separate `test:` commits, even when they live in the same file (classify each test hunk by its `section` -- the test function name). One behavior's tests = one commit; N unrelated tests = N commits.
 - **The litmus tests:** (a) would the commit message still be accurate for each file alone? Then each file is its own commit. (b) Could `git revert` of this commit undo exactly one decision?
 - **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
 
-Do not fear high commit counts: 30 one-file commits are better than 6 bundles. hc executes large plans cheaply.
+**History size is NEVER a problem -- internalize this.** Do not fear high commit counts: 30 one-file commits are better than 6 bundles, and 10 single-test commits are better than one `test: add tests` blob. There is no such thing as "too many commits" from correct splitting; hc executes large plans cheaply. When torn between merging and splitting, ALWAYS split.
 
 ## Commit Ordering
 
 Order commits so the history builds cleanly:
 1. Infrastructure / types / helpers with no dependencies first
 2. Code that uses them second
-3. Tests last (or paired with their feature if the project convention is feature+test)
+3. Each test commit immediately after the code commit it covers (never in the same commit; see the granularity rules)
 
 Goal: each commit should compile and pass tests on its own. hc creates commits strictly in plan order.
 
@@ -163,7 +165,7 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 
 ## Common Patterns
 
-**One test per commit (tests in one file, classified via `section`):**
+**One test per commit -- the DEFAULT for test work (tests in one file, classified via `section`):**
 ```json
 {
   "commits": [
@@ -202,10 +204,8 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 {
   "allow_unplanned": ["experiments/**"],
   "commits": [
-    {
-      "message": "fix(db): close connections on timeout",
-      "files": [{"path": "db.go", "hunks": [0]}, {"path": "db_test.go"}]
-    }
+    {"message": "fix(db): close connections on timeout", "files": [{"path": "db.go", "hunks": [0]}]},
+    {"message": "test(db): cover connection close on timeout", "files": [{"path": "db_test.go"}]}
   ]
 }
 ```
