@@ -252,10 +252,12 @@ hc rewrite plan.json
 ]}]}
 ```
 
-**New files split per section too.** A commit that ADDED a whole file (e.g. a fresh test suite committed in one go) is not stuck as one hunk: `hc log --json` exposes the file as per-section synthetic hunks (one per detected function, preamble riding with the first), `hc split --hunks` proposes one commit per section, and `hc rewrite` stages any subset -- so "one commit per NEW test" is enforceable retroactively on freshly-authored branches. Notes:
+**New files split per section too.** A commit that ADDED a whole file (e.g. a fresh test suite committed in one go) is not stuck as one hunk: `hc log --json` exposes the file as per-section synthetic hunks, `hc split --hunks` proposes one commit per section, and `hc rewrite` stages any subset -- so "one commit per NEW test" is enforceable retroactively on freshly-authored branches. Semantics:
 
+- **In TEST files the split is per-TEST, not per-function:** only test-like functions (name conventions `test*`/`it_*`/`should_*`/..., or a `#[Test]`/`@test` attribute above) open groups; helpers, `setUp` and other support functions fold into the preceding group. Attribute/docblock/comment lines ride with the function they decorate. Non-test files split per function.
+- **Intermediate commits stay syntactically valid.** The file's trailing closing scaffold (a class's closing brace) is exposed as a final `closing scaffold` hunk -- **assign it to the FIRST commit** (as `hc split --hunks` drafts do): later hunks insert before it by construction, so every intermediate file is closed. Preamble rides with the first group automatically.
 - Section detection uses git's own funcname machinery, so languages whose functions git only recognizes via a diff driver (indented methods: PHP, Ruby, ...) need the usual `.gitattributes` line (e.g. `*.php diff=php`) -- the same requirement ordinary diff sections have. Without it the file stays one hunk.
-- Selecting all of a new file's hunks reproduces the original content byte-for-byte (tree identity is still verified); intermediate commits contain the file with only the selected functions, which may not compile for languages where the closing scaffold sits on the last line -- acceptable for rewrite (the final tree is what CI sees), just don't bisect into the middle of such a split.
+- **Custom boundaries without touching hc:** since sections come from git, a repo can define its own boundary rules via a custom userdiff driver -- e.g. `tests/**/*.php diff=phptest` in `.gitattributes` plus `git config diff.phptest.xfuncname '^\s*(public\s+)?function\s+(test|it_)\w+'` makes ONLY test methods open sections. hc honors it automatically; no AST/language plugin exists or is planned.
 - Plain-text/config new files (no function-like sections) keep their single whole-file hunk.
 
 Rules:
