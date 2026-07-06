@@ -113,7 +113,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 - **Do NOT batch the whole task and commit once at the end.** Commit after every completed unit (change + green test); stacked uncommitted edits fuse into inseparable hunks.
 - **Do NOT defer test-writing to the end of the task.** The test belongs to the unit it covers, written right after the change.
 - **Do NOT bundle same-kind work across files** ("add tests for X, Y and Z" in one commit). Unless it is a mechanical sweep or an inseparable change, every file is its own commit.
-- **Do NOT bundle a change and its test into one commit, and do NOT bundle unrelated tests into one `test:` commit.** Tests are always separate commits; tests for different behaviors are separate commits from each other (per-test-function via `section`). "It would bloat the history" is never a reason to merge -- history size is not a problem.
+- **Do NOT bundle a change and its test into one commit, and do NOT bundle several NEW tests into one `test:` commit.** Every newly written test function is its own commit (classify via `section`). Only MODIFICATIONS to existing tests may group, and only when one context drives them. "It would bloat the history" is never a reason to merge -- history size is not a problem.
 - **Do NOT write `hunks: [all indices]` (or omit `hunks`) for a multi-hunk file without reading each hunk's `section`/`content`.** This is the most common under-split. Start from `hc plan` instead -- it pre-splits by section -- and treat `hc run`'s `review granularity` warning as a prompt to re-check.
 
 ## Commit Cadence -- commit as you work, not at the end
@@ -139,7 +139,7 @@ Everything else splits:
 - **Same KIND of change across files is not a sweep.** "Fork the Store* action tests" over 9 files is 9 commits (`test: fork StoreOrderAction test`, `test: fork StorePaymentAction test`, ...) -- each file reviews and reverts on its own. A sweep transforms existing lines mechanically; writing/forking N distinct files is N pieces of work.
 - **Split within a file too -- the most-skipped rule.** If a file's hunks carry separable ideas, give each its own commit. Check the file's `sections` array first: more than one section usually means more than one idea. Worked example: a state-machine file with 5 hunks across `region`, `isReadyForSubmission` and a new endpoint = 3 commits (imports ride with the code that needs them), NOT `"hunks": [0,1,2,3,4]` in one.
 - **Type boundaries are commit boundaries.** feat / fix / test / refactor / docs / chore never share a commit.
-- **Tests are ALWAYS their own commits.** A change and its test never share a commit -- the test commit follows immediately after the code commit it covers. And unrelated tests never share a commit either: tests exercising different behaviors get separate `test:` commits, even when they live in the same file (classify each test hunk by its `section` -- the test function name). One behavior's tests = one commit; N unrelated tests = N commits.
+- **Tests are ALWAYS their own commits, one commit per NEW test.** A change and its test never share a commit -- the test commit follows immediately after the code commit it covers. Every newly written test function is its own commit, even when several live in the same file (classify each test hunk by its `section` -- the test function name): N new tests = N commits. The one softening: MODIFICATIONS to existing tests may share a commit when a single context drives them (e.g. one behavior change forces updates across several existing tests) -- new tests never ride along with those either.
 - **The litmus tests:** (a) would the commit message still be accurate for each file alone? Then each file is its own commit. (b) Could `git revert` of this commit undo exactly one decision?
 - **New files can't be hunk-split.** If a new file will contain several logical changes, prefer creating it in separate passes and committing between them.
 
@@ -165,13 +165,22 @@ Goal: each commit should compile and pass tests on its own. hc creates commits s
 
 ## Common Patterns
 
-**One test per commit -- the DEFAULT for test work (tests in one file, classified via `section`):**
+**One commit per NEW test -- the rule for newly written tests (same file, classified via `section`):**
 ```json
 {
   "commits": [
     {"message": "test(auth): add token expiry test", "files": [{"path": "auth_test.go", "hunks": [0]}]},
     {"message": "test(auth): add token refresh test", "files": [{"path": "auth_test.go", "hunks": [1]}]},
     {"message": "test(auth): add token revoke test", "files": [{"path": "auth_test.go", "hunks": [2]}]}
+  ]
+}
+```
+
+**Modified existing tests may group by driving context** (one behavior change forced all three updates -- new tests still commit separately):
+```json
+{
+  "commits": [
+    {"message": "test(auth): update expiry fixtures for new token TTL", "files": [{"path": "auth_test.go", "hunks": [0, 1, 2]}]}
   ]
 }
 ```
