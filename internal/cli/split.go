@@ -102,6 +102,9 @@ func runSplit(runner *git.Runner, rangeArg, template string, hunksMode bool) (*p
 			return nil, 0, output.NewExecutionError(
 				fmt.Sprintf("cannot parse diff of %s: %v", sha, err), "")
 		}
+		if hunksMode {
+			expandNewFileHunks(runner, files)
+		}
 		subject, _ := splitMessage(ci.Message)
 		rw := plan.Rewrite{Commit: shortSHA(ci.SHA)}
 		for _, fd := range files {
