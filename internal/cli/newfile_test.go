@@ -238,3 +238,36 @@ func TestNewFilePerTestGrouping(t *testing.T) {
 		t.Errorf("a helper between tests must fold into the preceding group:\n%s", hunks[0].Content)
 	}
 }
+
+// TestNewFileRewriteValidIntermediates splits the PHP file per test with the
+// closing scaffold in the FIRST commit and verifies every intermediate file
+// is brace-balanced (i.e. the class is closed at each step).
+func TestNewFileRewriteValidIntermediates(t *testing.T) {
+	r := phpTestRepo(t)
+	sha, err := r.ResolveSHA("HEAD")
+	must(t, err)
+
+	planJSON := `{"rewrites":[{"commit":"` + sha + `","commits":[
+		{"message":"test: it_stores_an_order","files":[{"path":"tests/StoreOrderActionTest.php","hunks":[0,2]}]},
+		{"message":"test: it_fires_the_event","files":[{"path":"tests/StoreOrderActionTest.php","hunks":[1]}]}]}]}`
+	res, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
+	if acErr != nil {
+		t.Fatalf("runRewrite: %v | %s", acErr, acErr.Hint)
+	}
+	if !res.TreeIdentical || res.Summary.Replacements != 2 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+
+	for _, ref := range []string{"HEAD~1", "HEAD"} {
+		content, err := r.Run("show", ref+":tests/StoreOrderActionTest.php")
+		must(t, err)
+		if strings.Count(content, "{") != strings.Count(content, "}") {
+			t.Errorf("%s: intermediate file is not brace-balanced:\n%s", ref, content)
+		}
+	}
+	final, err := r.Run("show", "HEAD:tests/StoreOrderActionTest.php")
+	must(t, err)
+	if final != newFilePHPTests {
+		t.Errorf("final content must be byte-identical to the original")
+	}
+}
