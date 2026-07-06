@@ -103,3 +103,26 @@ func TestNewFileRewritePerTest(t *testing.T) {
 		t.Errorf("final content must be byte-identical to the original")
 	}
 }
+
+// TestNewFilePlainTextStaysWhole verifies expansion falls back gracefully:
+// a new file without function-like sections keeps its single hunk.
+func TestNewFilePlainTextStaysWhole(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("s\n"), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "base"))
+	doc := "# Title\n\nSome prose here.\n\nMore prose.\n\n## Section two\n\nEven more prose lines.\n"
+	must(t, os.WriteFile(filepath.Join(dir, "NOTES.md"), []byte(doc), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-qm", "docs: add notes"))
+
+	result, acErr := runLog(r, "HEAD~1..HEAD", false)
+	if acErr != nil {
+		t.Fatalf("runLog: %v", acErr)
+	}
+	hunks := result.Commits[0].Files[0].Hunks
+	if len(hunks) != 1 {
+		t.Fatalf("plain text must stay one hunk, got %d", len(hunks))
+	}
+}
