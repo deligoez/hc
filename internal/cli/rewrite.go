@@ -339,6 +339,9 @@ func buildSplit(runner, tempRunner *git.Runner, orig *git.CommitInfo, rw *plan.R
 			"Empty commits cannot be split.",
 		)
 	}
+	// Same expansion as hc log/split: a new file's whole-file hunk becomes
+	// per-section hunks, so plans written from hc log's indices line up.
+	expandNewFileHunks(runner, parsedFiles)
 
 	// Validate the sub-plan with the same rules as hc run: full coverage,
 	// no duplicates, sane fields. No allow_unplanned inside a commit.
