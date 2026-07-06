@@ -19,30 +19,37 @@ func planDraft(t *testing.T, r *git.Runner) *plan.Plan {
 	t.Helper()
 	result, err := runDiff(r)
 	must(t, err)
-	p := &plan.Plan{}
-	for _, f := range result.Files {
-		groups := groupHunksBySection(f.Hunks)
-		if len(groups) > 1 && !f.IsBinary && !f.IsDeleted {
-			for _, g := range groups {
-				p.Commits = append(p.Commits, plan.Commit{
-					Message: "TODO (" + f.Path + ": " + g.section + ")",
-					Files:   []plan.FileEntry{{Path: f.Path, Hunks: g.indices}},
-				})
-			}
-			continue
-		}
-		p.Commits = append(p.Commits, plan.Commit{
-			Message: "TODO (" + f.Path + ")",
-			Files:   []plan.FileEntry{{Path: f.Path}},
-		})
-	}
-	for _, path := range result.Untracked {
-		p.Commits = append(p.Commits, plan.Commit{
-			Message: "TODO (new file " + path + ")",
-			Files:   []plan.FileEntry{{Path: path}},
-		})
-	}
+	p, _ := buildDraftPlan(result)
 	return p
+}
+
+// TestIsTestFileHeuristic covers the filename and directory conventions that
+// mark a draft entry as test code.
+func TestIsTestFileHeuristic(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"internal/cli/plancmd_test.go", true},
+		{"src/auth.spec.ts", true},
+		{"src/auth.test.js", true},
+		{"tests/Feature/LoginTest.php", true},
+		{"app/Services/PaymentTest.php", true},
+		{"test_models.py", true},
+		{"pkg/testdata/fixture.json", true},
+		{"spec/models/user_spec.rb", true},
+		{"src/__tests__/util.js", true},
+		{"internal/cli/plancmd.go", false},
+		{"spec/0.2.0.md", false},
+		{"docs/contest.php", false},
+		{"src/attest.go", false},
+		{"latest.config.js", false},
+	}
+	for _, c := range cases {
+		if got := isTestFile(c.path); got != c.want {
+			t.Errorf("isTestFile(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
 }
 
 // TestPlanDraftForcesReviewThenRunsGranular exercises the whole forcing
