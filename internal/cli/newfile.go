@@ -86,6 +86,11 @@ func splitAdditionBySection(runner *git.Runner, path string, h diff.Hunk) []diff
 		if testFile && !isTestFunction(sec, h.Lines, start, k) {
 			continue // helper/support function: fold into the previous group
 		}
+		// Decoration walk-back must never reach back into the previous
+		// group's declaration; keep starts strictly increasing.
+		if n := len(spans); n > 0 && start <= spans[n-1].declStart {
+			start = spans[n-1].declStart + 1
+		}
 		spans = append(spans, span{start: start, declStart: k, section: sec})
 	}
 	if len(spans) < 2 {
@@ -96,6 +101,19 @@ func splitAdditionBySection(runner *git.Runner, path string, h diff.Hunk) []diff
 	// Carve the trailing closing scaffold: the suffix of lines less indented
 	// than the last declaration (e.g. a class's closing brace).
 	trailerStart := trailingScaffoldStart(h.Lines, spans[len(spans)-1].declStart)
+
+	// Sanity: every span must own at least one line, in order. If detection
+	// degenerated (it should not), keep the file whole rather than emit
+	// zero-length hunks.
+	for i := range spans {
+		end := trailerStart
+		if i+1 < len(spans) {
+			end = spans[i+1].start
+		}
+		if end <= spans[i].start {
+			return nil
+		}
+	}
 
 	hunks := make([]diff.Hunk, 0, len(spans)+1)
 	for i, sp := range spans {
@@ -240,8 +258,28 @@ func funcNameOf(section string) string {
 }
 
 // newFileMarker is appended to lines when probing sections; it only needs to
-// make the line differ, and it is stripped from every harvested section.
-const newFileMarker = "~hc-sec~"
+// make the line differ. A single character keeps the truncation window of
+// git's ~80-byte funcname excerpt as small as possible (see sectionKey).
+const newFileMarker = "~"
+
+// sectionKeyMax trims harvested funcnames below git's excerpt cap so that a
+// marked and an unmarked probe of the SAME declaration always normalize to
+// the SAME string. Git cuts funcnames at ~80 bytes; the marker can displace
+// the tail of a long declaration in one probe but not the other, so anything
+// near the cap is untrustworthy and cut away.
+const sectionKeyMax = 72
+
+// sectionKey normalizes a funcname harvested from a marker-perturbed probe:
+// strip the marker (whole, or cut mid-way by the excerpt cap), then truncate
+// below the cap so both probes of one declaration agree byte-for-byte.
+func sectionKey(raw string) string {
+	s := strings.TrimSpace(raw)
+	s = strings.ReplaceAll(s, newFileMarker, "")
+	if len(s) > sectionKeyMax {
+		s = s[:sectionKeyMax]
+	}
+	return strings.TrimSpace(s)
+}
 
 // detectLineSections returns, for each added line, the raw funcname of the
 // section that ENCLOSES it, computed by git's own machinery: two tree diffs
@@ -296,8 +334,7 @@ func detectLineSections(runner *git.Runner, path string, lines []diff.Line) ([]s
 		}
 		for _, ph := range files[0].Hunks {
 			if ph.OldCount == 1 && int(ph.OldStart) < len(report) {
-				sec := strings.ReplaceAll(ph.Section, newFileMarker, "")
-				report[ph.OldStart] = strings.TrimSpace(sec)
+				report[ph.OldStart] = sectionKey(ph.Section)
 			}
 		}
 	}
@@ -342,9 +379,12 @@ func treeWithBlob(runner *git.Runner, path string, content []byte) (string, func
 // function or method -- the only boundaries worth a per-section commit in a
 // new file. Scaffold contexts (package, imports, class/type declarations)
 // must NOT open groups: they ride with the function that follows them.
+// Usually the parameter list is the signal; when a very long declaration's
+// "(" falls beyond git's ~80-byte funcname excerpt (and our sectionKey cut),
+// declaration keywords decide instead.
 func isFunctionSection(s string) bool {
 	s = strings.TrimSpace(s)
-	if s == "" || !strings.Contains(s, "(") {
+	if s == "" {
 		return false
 	}
 	first := strings.ToLower(strings.Fields(s)[0])
@@ -354,7 +394,18 @@ func isFunctionSection(s string) bool {
 		"while", "switch", "match", "var", "const", "let", "type":
 		return false
 	}
-	return true
+	if strings.Contains(s, "(") {
+		return true
+	}
+	if len(s) >= sectionKeyMax-8 { // likely truncated by the excerpt cap
+		lower := " " + strings.ToLower(s)
+		for _, kw := range []string{" function ", " func ", " def ", " fn ", " sub "} {
+			if strings.Contains(lower+" ", kw) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isExpandedNewFile reports whether a new file's hunks are synthetic
