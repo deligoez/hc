@@ -104,3 +104,38 @@ func TestImportOnlyHunkClaimsNoSection(t *testing.T) {
 		t.Errorf("an import riding with its method must not warn, got: %s", w)
 	}
 }
+
+// TestDeclaredName pins the two guards that keep incidental keywords from
+// being read as declarations: only modifier words may precede the keyword,
+// and the keyword must be followed by a name.
+func TestDeclaredName(t *testing.T) {
+	cases := []struct {
+		line string
+		want string
+	}{
+		{"func hydrateParams(raw []string) {", "hydrateParams"},
+		{"func (r *Runner) Diff(args ...string) error {", "Diff"},
+		{"func Map[T any](xs []T) []T {", "Map"},
+		{"    public function hydrateParams(array $raw, bool $strict = false): void", "hydrateParams"},
+		{"    protected static function make(): self", "make"},
+		{"async def fetch(session, url):", "fetch"},
+		{"export default function handler(req, res) {", "handler"},
+		{"def foo", "foo"},
+		// Anonymous: a keyword with no name declares no section.
+		{"        $callback = function ($x) {", ""},
+		{"\treturn function() {}", ""},
+		// Punctuation before the keyword: comments, strings, calls.
+		{"// call the function later", ""},
+		{"        $msg = \"the function foo(x) failed\";", ""},
+		{"        $this->each(function ($row) {", ""},
+		{"#[Test]", ""},
+		// No declaration keyword at all.
+		{"        $this->hydrated = true;", ""},
+		{"static void helper(void) {", ""},
+	}
+	for _, c := range cases {
+		if got := declaredName(c.line); got != c.want {
+			t.Errorf("declaredName(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
