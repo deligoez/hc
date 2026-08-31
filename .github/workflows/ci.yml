@@ -26,20 +26,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pinned, unlike the test job's `stable`: golangci-lint v2.12.2 bundles
-      # staticcheck (honnef.co/go/tools v0.7.0), whose IR builder panics with
-      # `unexpected expr: *ast.KeyValueExpr` while analysing the Go 1.27
-      # standard library (package `poll`). That is a tool limitation, not
-      # anything about this repo -- raise the pin once a golangci-lint release
-      # ships a staticcheck that parses 1.27.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: stable
 
       # Installed directly rather than through golangci-lint-action: the action
       # is versioned separately from the linter and a mismatch between the two
       # (v1 action, v2 config) fails in a way that reads like a config error.
-      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+      #
+      # Pin rules for every tool in this gate:
+      #   1. pin an exact version -- an unpinned tool breaks CI with no change here
+      #   2. keep it equal to what runs locally (`type -a`, not `brew list`)
+      #   3. keep it compatible with the Go version this job uses
+      #   4. review it on the date below, because a pin is a decision that rots
+      #
+      # v2.12.2 broke rule 3: it bundles staticcheck v0.7.0, whose IR builder
+      # panics with `unexpected expr: *ast.KeyValueExpr` on the Go 1.27 standard
+      # library. v2.13.0 added go1.27 support; v2.13.2 bundles staticcheck v0.8.1.
+      # Review by 2026-12-01.
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2
       - run: golangci-lint run
 
       # golangci-lint's `unused` skips exported identifiers by design, so an
