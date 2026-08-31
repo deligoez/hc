@@ -49,11 +49,11 @@ func TestSignatureChangeStaysOneSection(t *testing.T) {
 	if len(hunks) < 2 {
 		t.Fatalf("want the declaration hunk plus a body hunk, got %d", len(hunks))
 	}
-	if got := hunkSectionLabel(hunks[0]); got != "hydrateParams" {
+	if got := hunkSectionLabel("params.go", hunks[0]); got != "hydrateParams" {
 		t.Errorf("declaration hunk attributed to %q, want hydrateParams", got)
 	}
 	for i, h := range hunks {
-		if got := hunkSectionLabel(h); got != "hydrateParams" {
+		if got := hunkSectionLabel("params.go", h); got != "hydrateParams" {
 			t.Errorf("hunk %d label = %q, want hydrateParams", i, got)
 		}
 	}
@@ -95,10 +95,10 @@ func TestImportOnlyHunkClaimsNoSection(t *testing.T) {
 	if len(hunks) != 2 {
 		t.Fatalf("want the use-line hunk plus the method hunk, got %d", len(hunks))
 	}
-	if got := hunkSectionLabel(hunks[0]); got != "" {
+	if got := hunkSectionLabel("Command.php", hunks[0]); got != "" {
 		t.Errorf("import-only hunk label = %q, want no section", got)
 	}
-	if got := hunkSectionLabel(hunks[1]); got != "handle" {
+	if got := hunkSectionLabel("Command.php", hunks[1]); got != "handle" {
 		t.Errorf("method hunk label = %q, want handle", got)
 	}
 	if w := multiSectionWarning(singleCommitPlan("Command.php", 0, 1), result.Files); w != "" {
@@ -176,7 +176,7 @@ func TestProseParentheticalIsNotASection(t *testing.T) {
 		if !strings.Contains(h.Section, "(") {
 			t.Fatalf("hunk %d must carry a prose parenthetical to be a real test, got %q", i, h.Section)
 		}
-		if got := hunkSectionLabel(h); got != "" {
+		if got := hunkSectionLabel("doc.md", h); got != "" {
 			t.Errorf("hunk %d labeled %q from prose %q, want no section", i, got, h.Section)
 		}
 	}

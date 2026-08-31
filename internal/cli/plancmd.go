@@ -76,7 +76,7 @@ func buildDraftPlan(result *diffResult) (*plan.Plan, bool) {
 	}
 	for _, f := range result.Files {
 		todo := todoFor(f.Path)
-		groups := groupHunksBySection(f.Hunks)
+		groups := groupHunksBySection(f.Path, f.Hunks)
 		if len(groups) > 1 && !f.IsBinary && !f.IsDeleted {
 			for _, g := range groups {
 				p.Commits = append(p.Commits, plan.Commit{

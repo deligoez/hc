@@ -168,7 +168,7 @@ func fileToJSON(f diff.FileDiff) diffFileJSON {
 		jf.Hunks = append(jf.Hunks, diffHunkJSON{
 			Index:               h.Index,
 			Header:              hunkHeader(h),
-			Section:             hunkSection(h),
+			Section:             hunkSection(f.Path, h),
 			Added:               h.NewCount,
 			Deleted:             h.OldCount,
 			Fingerprint:         shortFingerprint(h.Fingerprint),

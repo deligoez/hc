@@ -113,7 +113,7 @@ func runSplit(runner *git.Runner, rangeArg, template string, hunksMode bool) (*p
 					rw.Commits = append(rw.Commits, newFileSplitCommits(template, subject, fd)...)
 					continue
 				}
-				if groups := groupHunksBySection(fd.Hunks); len(groups) > 1 {
+				if groups := groupHunksBySection(fd.Path, fd.Hunks); len(groups) > 1 {
 					for _, g := range groups {
 						rw.Commits = append(rw.Commits, plan.Commit{
 							Message: renderSplitMessage(template, subject, fd.Path, g.section),
@@ -194,7 +194,7 @@ const (
 //
 // The grouping is a draft heuristic for hc plan / hc split --hunks; the
 // reviewing agent merges or refines it.
-func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
+func groupHunksBySection(path string, hunks []diff.Hunk) []hunkGroup {
 	if len(hunks) < 2 {
 		return nil
 	}
@@ -203,7 +203,7 @@ func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
 	distinct := map[string]bool{}
 	next := ""
 	for i := len(hunks) - 1; i >= 0; i-- {
-		if s := hunkSectionLabel(hunks[i]); s != "" {
+		if s := hunkSectionLabel(path, hunks[i]); s != "" {
 			next = s
 		}
 		labels[i] = next

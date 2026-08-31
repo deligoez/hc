@@ -153,7 +153,7 @@ func TestGapFallbackGrouping(t *testing.T) {
 		{"three regions", []diffHunkForTest{mk(5, 3), mk(40, 2), mk(90, 1)}, 3},
 	}
 	for _, tc := range cases {
-		got := groupHunksBySection(buildSectionlessHunks(tc.hunks))
+		got := groupHunksBySection("config.go", buildSectionlessHunks(tc.hunks))
 		if tc.groups == 0 {
 			if got != nil {
 				t.Errorf("%s: want no proposal, got %+v", tc.name, got)
@@ -173,7 +173,7 @@ func TestGapFallbackGrouping(t *testing.T) {
 	for i := 0; i < 9; i++ {
 		many = append(many, mk(int64(10+i*50), 2))
 	}
-	if got := groupHunksBySection(buildSectionlessHunks(many)); got != nil {
+	if got := groupHunksBySection("config.go", buildSectionlessHunks(many)); got != nil {
 		t.Errorf("scattered-many file must not be gap-split, got %d groups", len(got))
 	}
 }

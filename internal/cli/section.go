@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/deligoez/hc/internal/diff"
@@ -30,9 +31,13 @@ var importKeywords = map[string]bool{
 }
 
 // hunkSectionLabel returns the short label of the section a hunk really
-// belongs to: the function it declares if its changed lines declare one, ""
-// if it only moves imports around, and git's reported section otherwise.
-func hunkSectionLabel(h diff.Hunk) string {
+// belongs to: for a prose document the heading it sits under, otherwise the
+// function it declares if its changed lines declare one, "" if it only moves
+// imports around, and git's reported section as the fallback.
+func hunkSectionLabel(path string, h diff.Hunk) string {
+	if isProseFile(path) {
+		return headingLabel(h.Section)
+	}
 	if _, name := declaringLine(h.Lines); name != "" {
 		return name
 	}
@@ -42,11 +47,17 @@ func hunkSectionLabel(h diff.Hunk) string {
 	return sectionLabel(h.Section)
 }
 
-// hunkSection returns the raw section line to display for a hunk: the
-// declaration its own lines carry, else git's reported one. Keeping the
-// displayed section and the derived label on the same source avoids showing
-// an agent one function while grouping by another.
-func hunkSection(h diff.Hunk) string {
+// hunkSection returns the raw section line to display for a hunk: the heading
+// for a prose document, else the declaration its own lines carry, else git's
+// reported one. Keeping the displayed section and the derived label on the
+// same source avoids showing an agent one section while grouping by another.
+func hunkSection(path string, h diff.Hunk) string {
+	if isProseFile(path) {
+		if headingLabel(h.Section) == "" {
+			return ""
+		}
+		return h.Section
+	}
 	if line, name := declaringLine(h.Lines); name != "" {
 		return line
 	}
@@ -178,6 +189,49 @@ func isImportOnlyHunk(lines []diff.Line) bool {
 		changed++
 	}
 	return changed > 0
+}
+
+// proseExtensions are documents whose sections are HEADINGS, not code. Git's
+// DEFAULT funcname regex treats any line starting with a letter as context,
+// so an ordinary English sentence becomes a hunk's "section" -- and because
+// technical prose names functions with their parens attached
+// (“ `definition()` “ in a doc), no code-shape test can tell the two apart.
+// Attribution for these files therefore comes from headings alone.
+var proseExtensions = map[string]bool{
+	".md": true, ".markdown": true, ".mdown": true, ".mkd": true, ".mkdn": true,
+	".rst": true, ".adoc": true, ".asciidoc": true, ".txt": true, ".text": true,
+}
+
+// isProseFile reports whether a path is a prose document by extension.
+func isProseFile(path string) bool {
+	return proseExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
+// headingLabel returns the title of an ATX markdown heading ("## Errors" ->
+// "Errors"), or "" for anything else -- which is every prose line, so a
+// document only yields sections where it really has them.
+//
+// Git reports headings as funcnames only when the file uses its built-in
+// markdown driver, i.e. the repository maps it in .gitattributes:
+//
+//	*.md diff=markdown
+//
+// This is the same opt-in that indented-method languages already need (see
+// `*.php diff=php`). Without it a prose file simply has no sections, and
+// `hc plan` falls back to contiguity gaps.
+func headingLabel(section string) string {
+	s := strings.TrimSpace(section)
+	level := 0
+	for level < len(s) && s[level] == '#' {
+		level++
+	}
+	if level == 0 || level > 6 || level == len(s) {
+		return ""
+	}
+	if s[level] != ' ' && s[level] != '\t' {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimRight(s[level:], " \t#"))
 }
 
 func isIdentByte(b byte) bool {
