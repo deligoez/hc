@@ -16,6 +16,13 @@ import (
 	"github.com/deligoez/hc/internal/plan"
 )
 
+// newRunCmd builds the `hc run` command.
+//
+// Baselined complexity hotspot (cognitive 48): the cobra RunE closure branches
+// over dry-run, JSON/TTY and partial-result reporting. The nesting is output
+// formatting, not logic.
+//
+//nolint:gocognit // measured 2026-08-31; refactor to clear, never add a new one
 func newRunCmd() *cobra.Command {
 	var dryRun bool
 	var prefix string
@@ -115,6 +122,12 @@ func newRunCmd() *cobra.Command {
 // prefixOpt (from --prefix) is prepended to every commit message; prefixing
 // is idempotent. Per-commit prefixes (e.g. one ticket per commit on an
 // umbrella branch) are the plan author's job: write them into the messages.
+//
+// Baselined complexity hotspot (cognitive 50): Phase 1 in full -- every
+// validation step in the order the spec fixes, each able to abort with its own
+// specific error before any git state changes.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...string) (any, *output.ACError) {
 	prefix := ""
 	if len(prefixOpt) > 0 {
@@ -630,6 +643,11 @@ func cleanupOrphanedIntentToAdd(runner *git.Runner, addedNFiles []string) {
 //     inconsistencies and working-tree drift up front, before any commit.
 //  2. Every commit is then simulated in order against a copy of the index,
 //     exercising the exact same staging calls as execution.
+//
+// Baselined complexity hotspot (cognitive 34): the setup, the per-commit replay
+// and the teardown share state that does not survive extraction cleanly.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func validateWithTempIndex(p *plan.Plan, states map[string]*fileState, runner *git.Runner) *output.ACError {
 	// --- (1) full-content invariant ---
 	for path, st := range states {

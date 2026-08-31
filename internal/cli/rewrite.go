@@ -98,6 +98,12 @@ type rewriteOpts struct {
 // externally visible until the single final ref update: all intermediate
 // objects are written unreferenced, so any validation failure leaves the
 // repository untouched (exit 2).
+//
+// Baselined complexity hotspot (cognitive 59): the rewrite driver -- plan
+// validation, ref safety, backup, per-commit replay -- in one ordered pass,
+// where every step depends on the previous one's state.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func runRewrite(planData []byte, runner *git.Runner, opts rewriteOpts) (*output.RewriteResult, *output.ACError) {
 	dryRun, force := opts.dryRun, opts.force
 	if err := runner.EnsureRepo(); err != nil {
@@ -319,6 +325,12 @@ func runRewrite(planData []byte, runner *git.Runner, opts rewriteOpts) (*output.
 // buildSplit turns one original commit into its replacement commits on top of
 // newParent, and verifies the final replacement reproduces the original tree
 // byte-for-byte.
+//
+// Baselined complexity hotspot (cognitive 49): builds one commit's replacement
+// chain across new, deleted, binary and hunk-mode files, each with its own
+// staging rule.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func buildSplit(runner, tempRunner *git.Runner, orig *git.CommitInfo, rw *plan.Rewrite, newParent string) ([]output.RewrittenEntry, *output.ACError) {
 	wrap := func(msg string) string {
 		return fmt.Sprintf("rewrite of %s: %s", shortSHA(orig.SHA), msg)

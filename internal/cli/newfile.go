@@ -287,6 +287,12 @@ func sectionKey(raw string) string {
 // for every line. Git reports the nearest declaration STRICTLY BEFORE a
 // changed line, so the section enclosing line k is what git reports for line
 // k+1 -- a sentinel line is appended so k+1 exists for the last line.
+//
+// Baselined complexity hotspot (cognitive 26): two marker-perturbed tree diffs
+// whose per-line results must be reconciled in step. Splitting the walk would
+// separate the two probes that have to agree line for line.
+//
+//nolint:gocognit // measured 2026-08-31; refactor to clear, never add a new one
 func detectLineSections(runner *git.Runner, path string, lines []diff.Line) ([]string, error) {
 	n := len(lines)
 

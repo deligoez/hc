@@ -14,6 +14,11 @@ import (
 // ValidateFields validates plan fields after parsing.
 // It checks for negative hunk indices, duplicate hunks, path safety,
 // full-file in multiple commits, and mixed full-file/hunk-select modes.
+//
+// Baselined complexity hotspot (cognitive 51): every plan-field rule in one
+// pass, each raising the exact error the spec names in Section 6.2.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func ValidateFields(p *Plan) error {
 	// Track per-file: which commits use full-file, which use hunk-select,
 	// and which (commitIdx, hunkIdx) pairs are assigned.
@@ -133,6 +138,12 @@ func ValidateFields(p *Plan) error {
 // It checks that all referenced files exist in the diff, hunk indices
 // are in range, binary files don't use hunks, and all diff hunks are
 // covered by the plan.
+//
+// Baselined complexity hotspot (cognitive 58): complete-coverage validation
+// across modified, new, deleted, binary and allow_unplanned files, each with
+// its own coverage rule.
+//
+//nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
 func ValidateCoverage(p *Plan, files []diff.FileDiff) error {
 	// Build a map from path to FileDiff.
 	diffMap := make(map[string]*diff.FileDiff, len(files))

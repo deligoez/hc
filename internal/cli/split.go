@@ -57,6 +57,11 @@ func newSplitCmd() *cobra.Command {
 
 // runSplit builds the draft rewrite plan for a range. In hunksMode, files
 // whose hunks span multiple sections are additionally split hunk-by-section.
+//
+// Baselined complexity hotspot (cognitive 39): walks the range and decides, per
+// commit and per file, which of the split modes applies.
+//
+//nolint:gocognit // measured 2026-08-31; refactor to clear, never add a new one
 func runSplit(runner *git.Runner, rangeArg, template string, hunksMode bool) (*plan.RewritePlan, int, *output.ACError) {
 	if template == "" {
 		template = "{subject} ({basename})"
