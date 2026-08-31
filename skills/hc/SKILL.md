@@ -54,7 +54,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 
 - `content` -- the changed lines, `+`/`-` prefixed. Diffs use `-U0`, so this is exactly the change, no context lines. Very large hunks (>100 lines) arrive capped to a head/tail sample with `content_truncated: true` and `content_omitted_lines` -- the counts and fingerprint still identify the hunk; you almost never need the elided middle.
 - `section` -- which section this hunk touches. Git labels a hunk with the declaration BEFORE its first changed line, so a hunk that edits a signature would read as the PREVIOUS function; hc re-attributes those to the function they declare, and hunks that only add or remove imports claim no section at all (they ride with the code that needs them). Both corrections apply to the per-file `sections` array and the `review granularity` warning too, so a signature change or an import riding along no longer looks like two ideas.
-- **Docs and prose files (`.md`, `.rst`, `.txt`, ...) take sections from HEADINGS only.** A paragraph is never a section, however much it looks like code -- ``Thrown when `definition()` is not implemented`` is a sentence, not a declaration. Add `*.md diff=markdown` to the repo's `.gitattributes` (the same opt-in `*.php diff=php` needs) and `hc diff`/`hc plan` will group a docs change by the heading a reader navigates by; without it a prose file has no sections and falls back to the gap heuristic.
+- **Docs and prose files (`.md`, `.rst`, `.txt`, ...) take sections from HEADINGS only.** A paragraph is never a section, however much it looks like code -- ``Thrown when `definition()` is not implemented`` is a sentence, not a declaration. Map the repo's docs to get headings instead (see *Teaching git where a section starts* below); unmapped, a prose file has no sections and falls back to the gap heuristic.
 - Per-file `sections` -- the distinct sections the file's hunks touch, in order. **More than one entry = probably more than one idea**: plan hunk-level splits.
 - **Signal hierarchy for "is this one idea?":** different files > different sections > distant regions. Non-adjacent changes are separate hunks and therefore split CANDIDATES -- nearby hunks in the SAME section are usually one idea, but far-apart regions in a sectionless file (configs, docs, top-level code) usually are not. `hc plan` encodes exactly this: sections first, then a ~8-unchanged-line gap fallback (skipped for scattered-many files like lockfiles, which are one mechanical change).
 - `index` -- what you reference in the plan.
@@ -74,6 +74,19 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | `is_intent_to_add: true` (new file WITH hunks) | Stale `git add -N` from another tool | Nothing -- hc skips it from coverage and warns; plan its path only if you want it committed |
 
 **Hunk boundaries are git's:** `-U0` merges edits on adjacent lines into ONE hunk, and hc cannot split inside a hunk. If two logical changes ended up in the same hunk, either commit them together or make the edits in separate passes next time.
+
+## Teaching git where a section starts
+
+Sections are git's, not hc's: hc reads the funcname git puts after the trailing `@@`. So a repo teaches git its boundaries **once**, in `.gitattributes`, and `hc diff --json`, `hc plan`, `hc split --hunks` and the `review granularity` warning all sharpen together. Three instances of one rule:
+
+| `.gitattributes` line | Gives you | Without it |
+|---|---|---|
+| `*.php diff=php` (likewise `ruby`, `python`, `elixir`, ... -- `git help attributes` lists the built-ins) | Methods as sections in languages whose declarations are indented, which git's default regex does not see | The whole class reads as one section, and a new file stays one hunk |
+| `*.md diff=markdown` | Headings as sections in docs and specs | A prose file has NO sections at all, and `hc plan` falls back to the contiguity-gap heuristic |
+| `tests/**/*.php diff=phptest` plus `git config diff.phptest.xfuncname '^\s*(public\s+)?function\s+(test\|it_)\w+'` | Your own boundary rule -- here, only test methods open a section | git's per-language default applies |
+
+hc honors whatever git reports and has no AST or language plugin; none is planned. If a repo already carries the first line, the other two are the same move.
+
 
 ## Plan Format
 
@@ -257,8 +270,7 @@ hc rewrite plan.json
 
 - **In TEST files the split is per-TEST, not per-function:** only test-like functions (name conventions `test*`/`it_*`/`should_*`/..., or a `#[Test]`/`@test` attribute above) open groups; helpers, `setUp` and other support functions fold into the preceding group. Attribute/docblock/comment lines ride with the function they decorate. Non-test files split per function.
 - **Intermediate commits stay syntactically valid.** The file's trailing closing scaffold (a class's closing brace) is exposed as a final `closing scaffold` hunk -- **assign it to the FIRST commit** (as `hc split --hunks` drafts do): later hunks insert before it by construction, so every intermediate file is closed. Preamble rides with the first group automatically.
-- Section detection uses git's own funcname machinery, so languages whose functions git only recognizes via a diff driver (indented methods: PHP, Ruby, ...) need the usual `.gitattributes` line (e.g. `*.php diff=php`) -- the same requirement ordinary diff sections have. Without it the file stays one hunk.
-- **Custom boundaries without touching hc:** since sections come from git, a repo can define its own boundary rules via a custom userdiff driver -- e.g. `tests/**/*.php diff=phptest` in `.gitattributes` plus `git config diff.phptest.xfuncname '^\s*(public\s+)?function\s+(test|it_)\w+'` makes ONLY test methods open sections. hc honors it automatically; no AST/language plugin exists or is planned.
+- Section detection uses git's own funcname machinery, so a language whose declarations git does not recognize by default (indented methods: PHP, Ruby, ...) needs its `.gitattributes` line or the new file stays ONE hunk -- and a custom `xfuncname` driver redefines the boundaries with no hc involvement. See *Teaching git where a section starts*.
 - Plain-text/config new files (no function-like sections) keep their single whole-file hunk.
 
 Rules:
