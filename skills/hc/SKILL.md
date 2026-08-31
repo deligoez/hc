@@ -69,7 +69,7 @@ Each hunk in `hc diff --json` carries what you need to classify it -- never gues
 | `is_deleted: true` | Deleted file | `{"path": ...}` (full-file stages the deletion) |
 | `is_binary: true` | Binary file | Full-file only; `hunks` is a validation error |
 | `hunks: []`, no flags | Mode-only change (e.g. chmod +x) | Full-file: `{"path": ...}` |
-| Old path deleted + new path untracked | Rename/move | TWO entries: `{"path": "old"}` and `{"path": "new"}` (may share a commit); git shows it as a rename in history automatically |
+| Old path deleted + new path untracked | Rename/move | TWO entries: `{"path": "old"}` and `{"path": "new"}` (may share a commit); git shows it as a rename in history automatically. **If you renamed with `git mv`, run `git reset HEAD` first** -- `git mv` STAGES the rename, and hc reads unstaged changes only, so until you unstage it `hc diff` cannot see the rename at all and `hc run` rejects the plan |
 | `is_intent_to_add: true` (new file WITH hunks) | Stale `git add -N` from another tool | Nothing -- hc skips it from coverage and warns; plan its path only if you want it committed |
 
 **Hunk boundaries are git's:** `-U0` merges edits on adjacent lines into ONE hunk, and hc cannot split inside a hunk. If two logical changes ended up in the same hunk, either commit them together or make the edits in separate passes next time.
