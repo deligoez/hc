@@ -20,10 +20,7 @@ func TestParse_ValidPlan(t *testing.T) {
 		]
 	}`)
 
-	p, err := parseOrFail(t, data)
-	if err != nil {
-		return
-	}
+	p := parseOrFail(t, data)
 
 	if len(p.Commits) != 1 {
 		t.Fatalf("expected 1 commit, got %d", len(p.Commits))
@@ -51,10 +48,7 @@ func TestParse_FullFileNoHunks(t *testing.T) {
 		]
 	}`)
 
-	p, err := parseOrFail(t, data)
-	if err != nil {
-		return
-	}
+	p := parseOrFail(t, data)
 
 	if p.Commits[0].Files[0].Hunks != nil {
 		t.Fatalf("expected nil Hunks for full-file entry, got %v", p.Commits[0].Files[0].Hunks)
@@ -72,10 +66,7 @@ func TestParse_EmptyHunksNormalized(t *testing.T) {
 		]
 	}`)
 
-	p, err := parseOrFail(t, data)
-	if err != nil {
-		return
-	}
+	p := parseOrFail(t, data)
 
 	f := p.Commits[0].Files[0]
 	if f.Hunks != nil {
@@ -145,13 +136,13 @@ func TestParse_MissingFilePath(t *testing.T) {
 
 // --- helpers ---
 
-func parseOrFail(t *testing.T, data []byte) (*Plan, error) {
+func parseOrFail(t *testing.T, data []byte) *Plan {
 	t.Helper()
 	p, err := Parse(data)
 	if err != nil {
 		t.Fatalf("Parse failed unexpectedly: %v", err)
 	}
-	return p, nil
+	return p
 }
 
 func assertHasHint(t *testing.T, err error) {

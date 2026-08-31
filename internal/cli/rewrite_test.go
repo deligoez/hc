@@ -26,13 +26,14 @@ func mkCommit(t *testing.T, r *git.Runner, dir, msg string, files map[string]str
 	return sha
 }
 
-// assertSameContent asserts two revs have byte-identical trees.
-func assertSameContent(t *testing.T, r *git.Runner, a, b string) {
+// assertSameContent asserts a rev's tree is byte-identical to HEAD's -- the
+// invariant every rewrite must hold: the history changed, the content did not.
+func assertSameContent(t *testing.T, r *git.Runner, rev string) {
 	t.Helper()
-	out, err := r.Run("diff", a, b)
+	out, err := r.Run("diff", rev, "HEAD")
 	must(t, err)
 	if strings.TrimSpace(out) != "" {
-		t.Fatalf("trees differ between %s and %s:\n%s", a, b, out)
+		t.Fatalf("trees differ between %s and HEAD:\n%s", rev, out)
 	}
 }
 
@@ -59,7 +60,7 @@ func TestRewriteSplitHeadCommitPerFile(t *testing.T) {
 		t.Fatalf("rewrite failed: %v %s", acErr, acErr.Hint)
 	}
 
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 	subs := subjects(t, r, "HEAD~2..HEAD")
 	if subs[0] != "feat: update a" || subs[1] != "feat: update b" {
 		t.Fatalf("unexpected subjects: %v", subs)
@@ -94,7 +95,7 @@ func TestRewriteSplitMiddleCommitPreservesDownstream(t *testing.T) {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
 
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 	subs := subjects(t, r, "HEAD~3..HEAD")
 	want := []string{"part 1", "part 2", "later: untouched work"}
 	for i, w := range want {
@@ -126,7 +127,7 @@ func TestRewriteHunkLevelSplitWithinFile(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 
 	first, _ := r.Run("show", "HEAD~1", "--format=", "--unified=0")
 	if !strings.Contains(first, "+EDIT-A") || strings.Contains(first, "EDIT-B") {
@@ -154,7 +155,7 @@ func TestRewriteNewAndDeletedFiles(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 
 	stat, _ := r.Run("show", "--stat", "--format=", "HEAD~1")
 	if !strings.Contains(stat, "old.txt") || strings.Contains(stat, "new.txt") {
@@ -232,7 +233,7 @@ func TestRewriteRejectsMergeAndForeignCommits(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("split above merge failed: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 }
 
 func TestRewriteRootCommitRejected(t *testing.T) {
@@ -275,7 +276,7 @@ func TestRewritePushedGuardAndForce(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("--force rewrite failed: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 }
 
 func TestRewriteDryRunMovesNothing(t *testing.T) {
@@ -369,7 +370,7 @@ func TestRewriteMultipleCommitsInOnePlan(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("rewrite failed: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 	subs := subjects(t, r, "HEAD~5..HEAD")
 	want := []string{"1a", "1b", "middle untouched", "2a", "2b"}
 	for i, w := range want {
@@ -427,7 +428,7 @@ func TestRewritePreservesMidRangeMerge(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("rewrite across a mid-range merge failed: %v | %s", acErr, acErr.Hint)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 	if !res.TreeIdentical {
 		t.Fatal("tree_identical must be true")
 	}
@@ -471,7 +472,7 @@ func TestRewriteProtectRefusesUpstreamCommits(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("own commit should split under --protect: %v", acErr)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 }
 
 func TestRewriteSummaryOnlyOmitsReplacements(t *testing.T) {
@@ -522,7 +523,7 @@ func TestSplitEmitsFileFirstPlanThatRewriteAccepts(t *testing.T) {
 	if acErr != nil {
 		t.Fatalf("emitted plan rejected by rewrite: %v | %s", acErr, acErr.Hint)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 	if res.Summary.Split != 2 || res.Summary.Replacements != 4 || res.Summary.Kept != 1 {
 		t.Fatalf("summary wrong: %+v", res.Summary)
 	}
@@ -605,5 +606,5 @@ func endpoint() {
 	if _, acErr := runRewrite(planJSON, r, rewriteOpts{}); acErr != nil {
 		t.Fatalf("hunks-mode draft rejected by rewrite: %v | %s", acErr, acErr.Hint)
 	}
-	assertSameContent(t, r, oldHead, "HEAD")
+	assertSameContent(t, r, oldHead)
 }

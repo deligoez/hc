@@ -135,7 +135,7 @@ func TestPropertyRandomRewrites(t *testing.T) {
 			}
 
 			// (1) content identity
-			assertSameContent(t, r, oldHead, "HEAD")
+			assertSameContent(t, r, oldHead)
 			// (2) commit count
 			oldCount := len(history) + 1 + 1 // initRepo initial + base + history
 			newTotal, _ := r.Run("rev-list", "--count", "HEAD")

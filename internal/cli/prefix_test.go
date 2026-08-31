@@ -10,7 +10,7 @@ import (
 	"github.com/deligoez/hc/internal/output"
 )
 
-func setupPrefixRepo(t *testing.T) (string, *git.Runner) {
+func setupPrefixRepo(t *testing.T) *git.Runner {
 	t.Helper()
 	dir := t.TempDir()
 	r := initRepo(t, dir)
@@ -18,11 +18,11 @@ func setupPrefixRepo(t *testing.T) (string, *git.Runner) {
 	must(t, run(r, "add", "-A"))
 	must(t, run(r, "commit", "-qm", "base"))
 	must(t, os.WriteFile(filepath.Join(dir, "f.txt"), []byte("b\n"), 0o644))
-	return dir, r
+	return r
 }
 
 func TestPrefixFlagPrepends(t *testing.T) {
-	_, r := setupPrefixRepo(t)
+	r := setupPrefixRepo(t)
 
 	res, acErr := runPlan([]byte(`{"commits":[{"message":"fix: b","files":[{"path":"f.txt"}]}]}`), r, false, "WB-1234: ")
 	if acErr != nil {
@@ -38,7 +38,7 @@ func TestPrefixFlagPrepends(t *testing.T) {
 }
 
 func TestPrefixFlagIdempotent(t *testing.T) {
-	_, r := setupPrefixRepo(t)
+	r := setupPrefixRepo(t)
 
 	res, acErr := runPlan([]byte(`{"commits":[{"message":"WB-1234: fix: b","files":[{"path":"f.txt"}]}]}`), r, false, "WB-1234: ")
 	if acErr != nil {
@@ -50,7 +50,7 @@ func TestPrefixFlagIdempotent(t *testing.T) {
 }
 
 func TestNoPrefixLeavesMessagesAlone(t *testing.T) {
-	_, r := setupPrefixRepo(t)
+	r := setupPrefixRepo(t)
 
 	res, acErr := runPlan([]byte(`{"commits":[{"message":"fix: b","files":[{"path":"f.txt"}]}]}`), r, false)
 	if acErr != nil {
