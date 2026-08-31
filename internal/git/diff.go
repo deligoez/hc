@@ -8,13 +8,6 @@ func (r *Runner) Diff(flags ...string) (string, error) {
 	return r.Run(args...)
 }
 
-// DiffFile runs git diff for a specific file.
-func (r *Runner) DiffFile(path string, flags ...string) (string, error) {
-	args := append([]string{"diff"}, flags...)
-	args = append(args, "--", path)
-	return r.Run(args...)
-}
-
 // DiffTrees returns the -U0 diff between two tree objects. Running inside the
 // repository keeps path-based diff attributes (funcname drivers) in effect.
 func (r *Runner) DiffTrees(a, b string) (string, error) {
