@@ -57,12 +57,12 @@ func TestManyFilesManyCommits(t *testing.T) {
 	var commits []string
 	for _, fd := range parsed {
 		if fd.IsDeleted {
-			commits = append(commits, fmt.Sprintf(`{"message":"rm %s","files":[{"path":"%s"}]}`, fd.Path, fd.Path))
+			commits = append(commits, fmt.Sprintf(`{"message":"rm %s","files":[{"path":%q}]}`, fd.Path, fd.Path))
 			continue
 		}
 		for _, h := range fd.Hunks {
 			commits = append(commits, fmt.Sprintf(
-				`{"message":"c %s %d","files":[{"path":"%s","hunks":[%d]}]}`, fd.Path, h.Index, fd.Path, h.Index))
+				`{"message":"c %s %d","files":[{"path":%q,"hunks":[%d]}]}`, fd.Path, h.Index, fd.Path, h.Index))
 		}
 	}
 	commits = append(commits, `{"message":"add brand-new","files":[{"path":"brand-new.txt"}]}`)

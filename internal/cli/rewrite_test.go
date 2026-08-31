@@ -210,14 +210,14 @@ func TestRewriteRejectsMergeAndForeignCommits(t *testing.T) {
 	mergeSHA, _ := r.ResolveSHA("HEAD~1")
 
 	// Splitting the merge itself is rejected.
-	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"a.txt"}]}]}]}`, mergeSHA)
+	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":%q,"commits":[{"message":"x","files":[{"path":"a.txt"}]}]}]}`, mergeSHA)
 	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "merge") {
 		t.Fatalf("merge commit should be rejected, got %v", acErr)
 	}
 
 	// A commit only reachable through the side branch (not first-parent) is rejected.
-	planJSON = fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"s.txt"}]}]}]}`, sideSHA)
+	planJSON = fmt.Sprintf(`{"rewrites":[{"commit":%q,"commits":[{"message":"x","files":[{"path":"s.txt"}]}]}]}`, sideSHA)
 	_, acErr = runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "first-parent") {
 		t.Fatalf("foreign commit should be rejected, got %v", acErr)
@@ -240,7 +240,7 @@ func TestRewriteRootCommitRejected(t *testing.T) {
 	r := initRepo(t, dir)
 	root, err := r.Run("rev-list", "--max-parents=0", "HEAD")
 	must(t, err)
-	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":"%s","commits":[{"message":"x","files":[{"path":"y"}]}]}]}`, strings.TrimSpace(root))
+	planJSON := fmt.Sprintf(`{"rewrites":[{"commit":%q,"commits":[{"message":"x","files":[{"path":"y"}]}]}]}`, strings.TrimSpace(root))
 	_, acErr := runRewrite([]byte(planJSON), r, rewriteOpts{})
 	if acErr == nil || !strings.Contains(acErr.Message, "root commit") {
 		t.Fatalf("root commit should be rejected, got %v", acErr)

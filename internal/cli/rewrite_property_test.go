@@ -110,17 +110,17 @@ func TestPropertyRandomRewrites(t *testing.T) {
 							}
 						}
 						subCommits = append(subCommits,
-							fmt.Sprintf(`{"message":"split %s A","files":[{"path":"%s","hunks":[%s]}]}`, fd.Path, fd.Path, strings.Join(a, ",")),
-							fmt.Sprintf(`{"message":"split %s B","files":[{"path":"%s","hunks":[%s]}]}`, fd.Path, fd.Path, strings.Join(b, ",")))
+							fmt.Sprintf(`{"message":"split %s A","files":[{"path":%q,"hunks":[%s]}]}`, fd.Path, fd.Path, strings.Join(a, ",")),
+							fmt.Sprintf(`{"message":"split %s B","files":[{"path":%q,"hunks":[%s]}]}`, fd.Path, fd.Path, strings.Join(b, ",")))
 					} else {
 						subCommits = append(subCommits,
-							fmt.Sprintf(`{"message":"split %s","files":[{"path":"%s"}]}`, fd.Path, fd.Path))
+							fmt.Sprintf(`{"message":"split %s","files":[{"path":%q}]}`, fd.Path, fd.Path))
 					}
 				}
 				if len(subCommits) < 2 {
 					continue // splitting into one part is pointless; keep fuzz interesting
 				}
-				rewrites = append(rewrites, fmt.Sprintf(`{"commit":"%s","commits":[%s]}`, rec.sha, strings.Join(subCommits, ",")))
+				rewrites = append(rewrites, fmt.Sprintf(`{"commit":%q,"commits":[%s]}`, rec.sha, strings.Join(subCommits, ",")))
 				extra += len(subCommits) - 1
 				splitCount++
 			}
