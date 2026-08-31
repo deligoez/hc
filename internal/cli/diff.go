@@ -276,8 +276,8 @@ func printDiffTTY(result *diffResult) {
 		fmt.Fprintf(printer.Out, "%s (%d hunks%s):\n", f.Path, len(f.Hunks), suffix)
 		for _, h := range f.Hunks {
 			header := hunkHeader(h)
-			if h.Section != "" {
-				header += " " + h.Section
+			if sec := hunkSection(h); sec != "" {
+				header += " " + sec
 			}
 			fmt.Fprintf(printer.Out, "  [%d] %s  %s\n", h.Index, header, hunkLineSummary(h))
 		}
@@ -315,7 +315,7 @@ func printDiffJSON(result *diffResult) error {
 
 		seenSections := map[string]bool{}
 		for _, h := range f.Hunks {
-			if label := sectionLabel(h.Section); label != "" && !seenSections[label] {
+			if label := hunkSectionLabel(h); label != "" && !seenSections[label] {
 				seenSections[label] = true
 				jf.Sections = append(jf.Sections, label)
 			}
@@ -323,7 +323,7 @@ func printDiffJSON(result *diffResult) error {
 			jf.Hunks = append(jf.Hunks, diffHunkJSON{
 				Index:               h.Index,
 				Header:              hunkHeader(h),
-				Section:             h.Section,
+				Section:             hunkSection(h),
 				Added:               h.NewCount,
 				Deleted:             h.OldCount,
 				Fingerprint:         shortFingerprint(h.Fingerprint),

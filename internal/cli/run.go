@@ -361,7 +361,7 @@ func multiSectionWarning(p *plan.Plan, parsedFiles []diff.FileDiff) string {
 				if idx < 0 || idx >= len(fd.Hunks) {
 					continue
 				}
-				if l := sectionLabel(fd.Hunks[idx].Section); l != "" && !seen[l] {
+				if l := hunkSectionLabel(fd.Hunks[idx]); l != "" && !seen[l] {
 					seen[l] = true
 					labels = append(labels, l)
 				}

@@ -203,7 +203,7 @@ func groupHunksBySection(hunks []diff.Hunk) []hunkGroup {
 	distinct := map[string]bool{}
 	next := ""
 	for i := len(hunks) - 1; i >= 0; i-- {
-		if s := sectionLabel(hunks[i].Section); s != "" {
+		if s := hunkSectionLabel(hunks[i]); s != "" {
 			next = s
 		}
 		labels[i] = next
