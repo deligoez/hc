@@ -64,3 +64,26 @@ func TestParseRewrite_Rejections(t *testing.T) {
 		})
 	}
 }
+
+// TestParseRewrite_NormalizesEmptyHunks pins the one transformation
+// ParseRewrite performs: `"hunks": []` means full-file, exactly as in a
+// working-tree plan, and must reach the rewriter as nil so IsFullFile agrees.
+func TestParseRewrite_NormalizesEmptyHunks(t *testing.T) {
+	p, err := ParseRewrite([]byte(`{"rewrites":[{"commit":"abc123","commits":[{"message":"m","files":[
+		{"path":"empty.go","hunks":[]},
+		{"path":"absent.go"},
+		{"path":"selected.go","hunks":[0,2]}]}]}]}`))
+	if err != nil {
+		t.Fatalf("ParseRewrite: %v", err)
+	}
+	files := p.Rewrites[0].Commits[0].Files
+	if files[0].Hunks != nil || !files[0].IsFullFile() {
+		t.Errorf(`"hunks": [] must normalize to nil, got %v`, files[0].Hunks)
+	}
+	if files[1].Hunks != nil || !files[1].IsFullFile() {
+		t.Errorf("an absent hunks field must stay nil, got %v", files[1].Hunks)
+	}
+	if len(files[2].Hunks) != 2 || files[2].IsFullFile() {
+		t.Errorf("a real selection must survive untouched, got %v", files[2].Hunks)
+	}
+}
