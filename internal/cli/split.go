@@ -290,16 +290,13 @@ func sectionLabel(section string) string {
 }
 
 // looksLikeCodeSection reports whether a raw function-context line plausibly
-// names a code construct: it has a parameter list, or starts with a
-// declaration keyword. Arbitrary prose/config lines fail both. Very long
-// declarations can lose their parameter list to git's ~80-byte funcname
-// excerpt cap; for those a declaration keyword ANYWHERE marks them as code
-// (mirrors isFunctionSection's fallback -- the label path must not diverge
-// from the detection path).
+// names a code construct: it starts with a declaration keyword, or carries a
+// parameter list attached to a name. Arbitrary prose/config lines fail both.
+// Very long declarations can lose their parameter list to git's ~80-byte
+// funcname excerpt cap; for those a declaration keyword ANYWHERE marks them
+// as code (mirrors isFunctionSection's fallback -- the label path must not
+// diverge from the detection path).
 func looksLikeCodeSection(s string) bool {
-	if strings.Contains(s, "(") {
-		return true
-	}
 	fields := strings.Fields(s)
 	if len(fields) == 0 {
 		return false
@@ -310,12 +307,30 @@ func looksLikeCodeSection(s string) bool {
 		"module", "namespace", "package", "type", "object", "abstract":
 		return true
 	}
+	if hasCallSignature(s) {
+		return true
+	}
 	if len(s) >= sectionKeyMax-8 { // likely truncated by the excerpt cap
 		lower := " " + strings.ToLower(s) + " "
 		for _, kw := range []string{" function ", " func ", " def ", " fn ", " sub "} {
 			if strings.Contains(lower, kw) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasCallSignature reports whether a line carries a parameter list attached to
+// a name -- a "(" directly preceded by an identifier character, as in
+// "handle(" . A "(" with whitespace before it opens a parenthetical, which is
+// how prose reads: git's DEFAULT funcname regex treats any non-indented line
+// as context, so markdown and config files otherwise yield "sections" like
+// "convenience" harvested from "... for agent convenience (P1)".
+func hasCallSignature(s string) bool {
+	for i := 1; i < len(s); i++ {
+		if s[i] == '(' && isIdentByte(s[i-1]) {
+			return true
 		}
 	}
 	return false
