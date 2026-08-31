@@ -14,6 +14,73 @@ go test ./...            # run all tests
 go test ./... -count=1   # no cache
 ```
 
+## The gate
+
+CI runs exactly this, and so should you before pushing:
+
+```bash
+go build ./... && go test -race ./... -count=1 && golangci-lint run && ./scripts/deadcode.sh
+```
+
+`-race` is in the gate because hc shells out to git and reads its output; a race
+here surfaces as a flaky staging bug, which is the worst kind to chase.
+
+`.golangci.yml` enables the usual correctness set plus **`gocognit`,
+`funlen` and `dupl`**, because hc measured the worst complexity profile of the
+Go repos here (mean cognitive 6.29 against tp's 2.80, and 10.4% of files over
+500 lines). Three notes on how that file is set up, each of which took a
+measurement to get right:
+
+1. **Test files are excluded from `gocognit`/`funlen`/`dupl`.** hc's two most
+   complex functions are the property tests (cognitive 94 and 71) and every
+   clone found at threshold 150 was in a `_test.go`. Left on, the three linters
+   would only ever complain about the most valuable code in the repo.
+2. **Eleven production functions are baselined with `//nolint` and their
+   measured number.** Read the number: if a function grew past what its comment
+   claims, the comment is now a lie. `nolintlint` requires an explanation on
+   every suppression, so a baseline cannot quietly become an excuse. Refactoring
+   one to clear it is welcome; adding a twelfth is not.
+3. **`uniq-by-line: false`**, because the default hides every `funlen` finding
+   behind the `gocognit` one on the same declaration line.
+
+## Tooling beyond the gate
+
+| Tool | When | Why |
+|------|------|-----|
+| `deadcode -test ./...` | In the gate (`scripts/deadcode.sh`) | Fails on code nothing reaches at all. golangci-lint's `unused` skips exported identifiers by design, so an exported function with zero callers passes it; `deadcode` builds a call graph and does not care about case |
+| `deadcode ./...` | End of an implementation phase, **diffed against the previous run** | Reports test-only code; never in the gate, where it would fail on work in progress |
+| `govulncheck ./...` | Before every release | Reports only vulnerabilities the code actually calls |
+| `gremlins unleash ./internal/<pkg>` | Before a release, and whenever a claim is made about test quality | Mutation testing. Pass ONE package (`./internal/plan`), not `./internal/plan/...` -- gremlins appends `/...` itself |
+
+**Calibrate gremlins or its output is noise.** On default settings
+`internal/plan` reports 0% efficacy with 24 mutants timing out; with
+`--timeout-coefficient 50` the same tree reports 100%. Sweep 10/50/200 and use
+the value where the result stops moving. Always pass `--workers <n>`: unpinned,
+gremlins drove this machine's load average from 8 to 177 and manufactured most
+of its own timeouts, and two unpinned runs of the same tree do not compare.
+Cost, measured: `internal/plan` is 30 mutants in ~4s; `internal/cli` is 426
+mutants in ~16 minutes. That is a release-time check, not a per-commit gate.
+`-D/--diff <branch>` scopes mutation to changed code and would make it a
+per-task check -- untried here.
+
+**A surviving mutant is not a score to drive down.** Classify it: an equivalent
+mutant nothing can observe, an undocumented boundary, or a documented contract
+with no boundary test. Only the last is worth acting on, and say which ones are
+being left and why. `NOT COVERED` and `TIMED OUT` are their own categories, not
+survivors.
+
+Worked example, since this repo has one: `ValidateCoverage`'s `h >= len(hunks)`
+survived a `>=`-to-`>` mutation because the only test used index 5 against a
+3-hunk file -- a value an off-by-one still rejects. The contract was documented
+(the error names `indices 0-%d`); the boundary was not tested. Index 3 was the
+one input that separates the two, and `internal/plan` now runs at 100% efficacy
+with 100% mutator coverage.
+
+**Do not gate on** 100% coverage, CRAP, or Halstead Difficulty. Some teams hold
+100% coverage against a 4% mutation score; CRAP at full coverage reduces to
+cyclomatic complexity and carries no independent information; and across 4,618
+functions in these four repos exactly three exceed Halstead D of 80, none of
+them in hc.
 ## Committing in this repo (dogfooding)
 
 ALWAYS use `hc` itself to commit changes to this repo: build the binary (`go build -o /tmp/hc ./cmd/hc/`), run `/tmp/hc diff --json`, write a plan, and run it via heredoc. This dogfoods the agent workflow and surfaces UX problems and improvement ideas that unit tests cannot. Follow the granularity rules in `skills/hc/SKILL.md` (one file per commit by default; multi-file only for mechanical sweeps or inseparable changes; feat/fix/test/docs never share a commit; tests are ALWAYS separate commits from the code they cover, one commit per NEW test -- only modifications to existing tests may group, when one context drives them; history size is never a concern). Commit at unit-of-work cadence -- after each change + its passing test -- never as one batch at the end of the task (stacked edits fuse into inseparable hunks).
