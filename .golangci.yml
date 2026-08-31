@@ -17,6 +17,8 @@ linters:
     - gocognit
     - funlen
     - dupl
+    # A //nolint without a reason is how a baseline becomes an excuse.
+    - nolintlint
 
   settings:
     gocritic:
@@ -54,6 +56,10 @@ linters:
       statements: 60
     dupl:
       threshold: 150
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
 
   exclusions:
     rules:
