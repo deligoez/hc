@@ -317,6 +317,31 @@ func TestValidateCoverage_HunkOutOfRange(t *testing.T) {
 	assertHasHint(t, err)
 }
 
+// TestValidateCoverage_HunkOnePastTheEnd pins the BOUNDARY of the range check,
+// not just a value well outside it. Test 47 uses index 5 against 3 hunks, which
+// a `h > len` off-by-one would still reject -- so it passes whether the check
+// is `>=` or `>`. Index 3 is the first invalid one, and only it separates them.
+func TestValidateCoverage_HunkOnePastTheEnd(t *testing.T) {
+	p := &Plan{
+		Commits: []Commit{
+			{
+				Message: "fix: something",
+				Files: []FileEntry{
+					{Path: "auth/login.go", Hunks: []int{0, 1, 2, 3}},
+					{Path: "auth/login_test.go"},
+				},
+			},
+		},
+	}
+
+	err := ValidateCoverage(p, makeDiffFiles())
+	if err == nil {
+		t.Fatal("index 3 of a 3-hunk file must be rejected: valid indices are 0-2")
+	}
+	assertACError(t, err, "hunk index 3 out of range for auth/login.go (has 3 hunks, indices 0-2)")
+	assertHasHint(t, err)
+}
+
 // Test 48: Binary file with hunks -- error with hint.
 func TestValidateCoverage_BinaryWithHunks(t *testing.T) {
 	files := []diff.FileDiff{
