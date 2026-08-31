@@ -379,9 +379,10 @@ func treeWithBlob(runner *git.Runner, path string, content []byte) (string, func
 // function or method -- the only boundaries worth a per-section commit in a
 // new file. Scaffold contexts (package, imports, class/type declarations)
 // must NOT open groups: they ride with the function that follows them.
-// Usually the parameter list is the signal; when a very long declaration's
-// "(" falls beyond git's ~80-byte funcname excerpt (and our sectionKey cut),
-// declaration keywords decide instead.
+// Usually a parameter list attached to a name is the signal (a parenthetical
+// with a space before it is prose, not a signature); when a very long
+// declaration's "(" falls beyond git's ~80-byte funcname excerpt (and our
+// sectionKey cut), declaration keywords decide instead.
 func isFunctionSection(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -394,7 +395,7 @@ func isFunctionSection(s string) bool {
 		"while", "switch", "match", "var", "const", "let", "type":
 		return false
 	}
-	if strings.Contains(s, "(") {
+	if hasCallSignature(s) {
 		return true
 	}
 	if len(s) >= sectionKeyMax-8 { // likely truncated by the excerpt cap
