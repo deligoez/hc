@@ -28,7 +28,7 @@ hc diff --json
 hc plan > draft.json
 ```
 
-`hc plan` emits the finest mechanical split: one commit per file, split further by enclosing section when a file's hunks span several. Test files (by filename/directory convention) are labeled `TODO test (...)` -- those entries follow the test rules below: one commit per NEW test, never merged. Every message is a `TODO (...)` placeholder and **`hc run` refuses TODO messages**, so each entry must be reviewed. Your review job, per entry:
+`hc plan` emits the finest mechanical split: one commit per file, split further by enclosing section when a file's hunks span several. Test files (by filename/directory convention) are labeled `TODO test (...)` -- those entries follow the test rules below: one commit per NEW test, never merged. Every message is a `TODO (...)` placeholder and **`hc run` refuses TODO messages**, so each entry must be reviewed. Take the draft even when `hc diff --json` already gave you the whole picture: what it buys is not insight but **enumeration** -- every file and every hunk index is already assigned, which is the part hand-written plans get wrong once a diff passes a handful of files. You are editing a draft, not accepting a proposal. Your review job, per entry:
 
 1. **Write a real commit message.** While writing it, sanity-check the entry is one idea.
 2. **MERGE entries that belong together** -- mechanical sweeps, inseparable changes, one idea that happens to span sections. Merging is a conscious act; splitting is the default you inherit. Never merge `TODO test` entries for separate new tests.
