@@ -1,0 +1,5 @@
+# Git's built-in markdown driver reports headings as diff funcnames, which is
+# what hc reads as a hunk's section. Without this, docs and spec commits have
+# no sections at all (hc suppresses prose to keep sentences out of the section
+# signal) and hc plan falls back to contiguity gaps.
+*.md diff=markdown
