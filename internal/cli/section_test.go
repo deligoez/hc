@@ -184,3 +184,72 @@ func TestProseParentheticalIsNotASection(t *testing.T) {
 		t.Errorf("prose must not drive the granularity warning, got: %s", w)
 	}
 }
+
+// exceptionsDoc is the shape reported from production: technical prose that
+// names functions WITH their parens attached, which no code-shape test can
+// tell from a real declaration.
+const exceptionsDoc = `# Exceptions
+
+## MachineDefinitionNotFound
+
+Thrown when ` + "`definition()`" + ` is not implemented on a Machine subclass.
+
+- first note
+- second note
+
+## InvalidStateException
+
+Thrown when ` + "`transition($event)`" + ` targets a state that does not exist.
+
+- third note
+- fourth note
+`
+
+// TestMarkdownSectionsComeFromHeadings covers both halves of prose
+// attribution: a paragraph that mentions a function never becomes a section,
+// and a document mapped to git's markdown driver reports the heading a reader
+// actually navigates by.
+func TestMarkdownSectionsComeFromHeadings(t *testing.T) {
+	for _, driver := range []bool{false, true} {
+		dir := t.TempDir()
+		r := initRepo(t, dir)
+		if driver {
+			must(t, os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.md diff=markdown\n"), 0o644))
+		}
+		f := filepath.Join(dir, "exceptions.md")
+		must(t, os.WriteFile(f, []byte(exceptionsDoc), 0o644))
+		must(t, run(r, "add", "-A"))
+		must(t, run(r, "commit", "-m", "add exceptions.md"))
+
+		modified := strings.ReplaceAll(exceptionsDoc, "- second note", "- second note, expanded")
+		modified = strings.ReplaceAll(modified, "- fourth note", "- fourth note, expanded")
+		must(t, os.WriteFile(f, []byte(modified), 0o644))
+
+		result, err := runDiff(r)
+		if err != nil {
+			t.Fatalf("driver=%v runDiff: %v", driver, err)
+		}
+		hunks := result.Files[0].Hunks
+		if len(hunks) != 2 {
+			t.Fatalf("driver=%v: want 2 hunks, got %d", driver, len(hunks))
+		}
+
+		want := []string{"", ""}
+		if driver {
+			want = []string{"MachineDefinitionNotFound", "InvalidStateException"}
+		}
+		for i, h := range hunks {
+			if got := hunkSectionLabel("exceptions.md", h); got != want[i] {
+				t.Errorf("driver=%v hunk %d label = %q, want %q (git said %q)",
+					driver, i, got, want[i], h.Section)
+			}
+		}
+		// Either way a docs commit is one idea, never "spans definition,
+		// transition" harvested out of two sentences.
+		if !driver {
+			if w := multiSectionWarning(singleCommitPlan("exceptions.md", 0, 1), result.Files); w != "" {
+				t.Errorf("prose mentions must not drive the warning, got: %s", w)
+			}
+		}
+	}
+}
