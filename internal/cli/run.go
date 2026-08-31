@@ -348,25 +348,7 @@ func multiSectionWarning(p *plan.Plan, parsedFiles []diff.FileDiff) string {
 			if fd == nil {
 				continue
 			}
-			indices := f.Hunks
-			if f.IsFullFile() {
-				indices = nil
-				for _, h := range fd.Hunks {
-					indices = append(indices, h.Index)
-				}
-			}
-			seen := map[string]bool{}
-			var labels []string
-			for _, idx := range indices {
-				if idx < 0 || idx >= len(fd.Hunks) {
-					continue
-				}
-				if l := hunkSectionLabel(f.Path, fd.Hunks[idx]); l != "" && !seen[l] {
-					seen[l] = true
-					labels = append(labels, l)
-				}
-			}
-			if len(labels) > 1 {
+			if labels := entrySectionLabels(f, fd); len(labels) > 1 {
 				hits = append(hits, fmt.Sprintf("commit %d: %s spans %s", ci, f.Path, strings.Join(labels, ", ")))
 			}
 		}
@@ -379,6 +361,34 @@ func multiSectionWarning(p *plan.Plan, parsedFiles []diff.FileDiff) string {
 		sample += fmt.Sprintf(" (+%d more)", len(hits)-1)
 	}
 	return fmt.Sprintf("review granularity: %d commit(s) bundle hunks from multiple sections of one file -- split unless each is a single idea. %s", len(hits), sample)
+}
+
+// entrySectionLabels returns the distinct section labels a plan entry's hunk
+// selection touches, in first-seen order. A full-file entry covers every hunk;
+// out-of-range indices are ignored here because plan validation reports them
+// with a real error.
+func entrySectionLabels(f plan.FileEntry, fd *diff.FileDiff) []string {
+	indices := f.Hunks
+	if f.IsFullFile() {
+		indices = make([]int, 0, len(fd.Hunks))
+		for _, h := range fd.Hunks {
+			indices = append(indices, h.Index)
+		}
+	}
+	seen := map[string]bool{}
+	var labels []string
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(fd.Hunks) {
+			continue
+		}
+		l := hunkSectionLabel(f.Path, fd.Hunks[idx])
+		if l == "" || seen[l] {
+			continue
+		}
+		seen[l] = true
+		labels = append(labels, l)
+	}
+	return labels
 }
 
 // fileState holds everything needed to rebuild a hunk-mode file's staged
