@@ -71,7 +71,7 @@ func (r *Runner) DiffCommit(sha string) (string, error) {
 
 // BlobAt returns the content of path at rev ("" content and ok=false when the
 // path does not exist there).
-func (r *Runner) BlobAt(rev, path string) ([]byte, bool, error) {
+func (r *Runner) BlobAt(rev, path string) (content []byte, ok bool, err error) {
 	out, err := r.Run("show", rev+":"+path)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") ||
@@ -86,7 +86,7 @@ func (r *Runner) BlobAt(rev, path string) ([]byte, bool, error) {
 
 // TreeEntry returns (mode, blobSHA, true) for path in rev's tree, or ok=false
 // when the path is absent.
-func (r *Runner) TreeEntry(rev, path string) (string, string, bool, error) {
+func (r *Runner) TreeEntry(rev, path string) (mode, blobSHA string, ok bool, err error) {
 	out, err := r.Run("ls-tree", rev, "--", path)
 	if err != nil {
 		return "", "", false, err

@@ -193,7 +193,7 @@ const (
 // there are no context lines, so this is exactly the changed content.
 // It returns the rendered body plus the number of omitted middle lines
 // (0 when the hunk fits whole).
-func hunkContent(h diff.Hunk) (string, int) {
+func hunkContent(h diff.Hunk) (body string, omitted int) {
 	writeLine := func(b *strings.Builder, l diff.Line) {
 		switch l.Op {
 		case diff.OpAdd:
@@ -217,7 +217,7 @@ func hunkContent(h diff.Hunk) (string, int) {
 		return b.String(), 0
 	}
 
-	omitted := len(h.Lines) - contentHeadLines - contentTailLines
+	omitted = len(h.Lines) - contentHeadLines - contentTailLines
 	for i := 0; i < contentHeadLines; i++ {
 		if i > 0 {
 			b.WriteByte('\n')

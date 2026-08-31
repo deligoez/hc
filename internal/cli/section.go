@@ -77,7 +77,7 @@ func hunkSection(path string, h diff.Hunk) string {
 //
 // A modified declaration appears as its old line then its new one; the added
 // spelling wins, so a renamed function is attributed to the name it now has.
-func declaringLine(lines []diff.Line) (string, string) {
+func declaringLine(lines []diff.Line) (line, name string) {
 	var first, firstAdd *diff.Line
 	for i := range lines {
 		switch lines[i].Op {

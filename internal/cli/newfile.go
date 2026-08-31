@@ -348,7 +348,7 @@ func detectLineSections(runner *git.Runner, path string, lines []diff.Line) ([]s
 
 // treeWithBlob writes content as the sole entry (at path) of a fresh tree
 // object, via a throwaway index. The returned cleanup removes the index file.
-func treeWithBlob(runner *git.Runner, path string, content []byte) (string, func(), error) {
+func treeWithBlob(runner *git.Runner, path string, content []byte) (tree string, cleanup func(), err error) {
 	noop := func() {}
 	sha, err := runner.HashObjectWrite(content)
 	if err != nil {
@@ -361,13 +361,13 @@ func treeWithBlob(runner *git.Runner, path string, content []byte) (string, func
 	tmpPath := tmp.Name()
 	tmp.Close()
 	_ = os.Remove(tmpPath)
-	cleanup := func() { _ = os.Remove(tmpPath) }
+	cleanup = func() { _ = os.Remove(tmpPath) }
 	tempRunner := &git.Runner{Dir: runner.Dir, Env: []string{"GIT_INDEX_FILE=" + tmpPath}}
 	if err := tempRunner.StageBlob("100644", sha, path); err != nil {
 		cleanup()
 		return "", noop, err
 	}
-	tree, err := tempRunner.WriteTree()
+	tree, err = tempRunner.WriteTree()
 	if err != nil {
 		cleanup()
 		return "", noop, err

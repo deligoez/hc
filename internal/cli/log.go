@@ -136,9 +136,9 @@ func runLog(runner *git.Runner, rangeArg string, filesOnly bool) (*logOutputJSON
 }
 
 // splitMessage separates a raw commit message into subject and remaining body.
-func splitMessage(msg string) (string, string) {
+func splitMessage(msg string) (subject, body string) {
 	parts := strings.SplitN(msg, "\n", 2)
-	subject := strings.TrimSpace(parts[0])
+	subject = strings.TrimSpace(parts[0])
 	if len(parts) == 1 {
 		return subject, ""
 	}
