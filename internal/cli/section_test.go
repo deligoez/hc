@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deligoez/hc/internal/plan"
@@ -137,5 +138,49 @@ func TestDeclaredName(t *testing.T) {
 		if got := declaredName(c.line); got != c.want {
 			t.Errorf("declaredName(%q) = %q, want %q", c.line, got, c.want)
 		}
+	}
+}
+
+// TestProseParentheticalIsNotASection guards the other end of the section
+// signal: git's DEFAULT funcname regex treats any line starting with a letter
+// as context, so a markdown paragraph becomes a "section". A parenthetical
+// ("... for agent convenience (P1)") used to pass the code-construct filter on
+// the bare presence of a "(", labeling docs commits with harvested prose.
+func TestProseParentheticalIsNotASection(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+
+	src := "# Doc\n\n" +
+		"This command exists purely for agent convenience (P1). The agent may also read the diff.\n\n" +
+		"- first bullet\n- second bullet\n\n" +
+		"hc requires a clean staging area (no pre-existing staged changes). This is a hard rule.\n\n" +
+		"- third bullet\n- fourth bullet\n"
+	f := filepath.Join(dir, "doc.md")
+	must(t, os.WriteFile(f, []byte(src), 0o644))
+	must(t, run(r, "add", "doc.md"))
+	must(t, run(r, "commit", "-m", "add doc.md"))
+
+	modified := strings.ReplaceAll(src, "- second bullet", "- second bullet, reworded")
+	modified = strings.ReplaceAll(modified, "- fourth bullet", "- fourth bullet, reworded")
+	must(t, os.WriteFile(f, []byte(modified), 0o644))
+
+	result, err := runDiff(r)
+	if err != nil {
+		t.Fatalf("runDiff: %v", err)
+	}
+	hunks := result.Files[0].Hunks
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	for i, h := range hunks {
+		if !strings.Contains(h.Section, "(") {
+			t.Fatalf("hunk %d must carry a prose parenthetical to be a real test, got %q", i, h.Section)
+		}
+		if got := hunkSectionLabel(h); got != "" {
+			t.Errorf("hunk %d labeled %q from prose %q, want no section", i, got, h.Section)
+		}
+	}
+	if w := multiSectionWarning(singleCommitPlan("doc.md", 0, 1), result.Files); w != "" {
+		t.Errorf("prose must not drive the granularity warning, got: %s", w)
 	}
 }
