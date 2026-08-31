@@ -577,11 +577,15 @@ func endpoint() {
 		t.Fatalf("split --hunks failed: %v", acErr)
 	}
 	subs := rp.Rewrites[0].Commits
-	// Four groups: imports (git labels them with the package clause) plus
-	// one per touched function. Merging imports into the group that uses
-	// them is review-time judgment -- the draft only proposes.
-	if len(subs) != 4 {
-		t.Fatalf("want 4 section groups, got %d: %+v", len(subs), subs)
+	// Three groups, one per touched function. The import hunk claims no
+	// section of its own -- `import (` is scaffold, not a signature -- so it
+	// rides with the NEXT group, which is exactly the function that uses the
+	// new import.
+	if len(subs) != 3 {
+		t.Fatalf("want 3 section groups, got %d: %+v", len(subs), subs)
+	}
+	if len(subs[0].Files[0].Hunks) != 2 {
+		t.Fatalf("the import hunk must ride with region: %+v", subs[0])
 	}
 	for _, want := range []string{"region", "guard", "endpoint"} {
 		found := false
