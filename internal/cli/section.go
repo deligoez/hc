@@ -149,7 +149,8 @@ func nameAfterKeyword(rest string) string {
 			if rest[i] == '(' {
 				depth++
 			} else if rest[i] == ')' {
-				if depth--; depth == 0 {
+				depth--
+				if depth == 0 {
 					i++
 					break
 				}
