@@ -198,7 +198,16 @@ func groupHunksBySection(path string, hunks []diff.Hunk) []hunkGroup {
 	if len(hunks) < 2 {
 		return nil
 	}
+	if groups := groupByLabel(path, hunks); groups != nil {
+		return groups
+	}
+	return groupByGap(hunks)
+}
 
+// groupByLabel is tier 1: one group per distinct section label, with
+// label-less hunks inheriting the NEXT hunk's label. Returns nil when the
+// labels cannot discriminate (fewer than two distinct ones).
+func groupByLabel(path string, hunks []diff.Hunk) []hunkGroup {
 	labels := make([]string, len(hunks))
 	distinct := map[string]bool{}
 	next := ""
@@ -207,44 +216,37 @@ func groupHunksBySection(path string, hunks []diff.Hunk) []hunkGroup {
 			next = s
 		}
 		labels[i] = next
-	}
-	for _, l := range labels {
-		if l != "" {
-			distinct[l] = true
+		if next != "" {
+			distinct[next] = true
 		}
 	}
-
-	// Tier 1: sections discriminate.
-	if len(distinct) >= 2 {
-		var groups []hunkGroup
-		pos := map[string]int{}
-		for i, h := range hunks {
-			if gi, ok := pos[labels[i]]; ok {
-				groups[gi].indices = append(groups[gi].indices, h.Index)
-				continue
-			}
-			pos[labels[i]] = len(groups)
-			groups = append(groups, hunkGroup{section: labels[i], indices: []int{h.Index}})
-		}
-		return groups
+	if len(distinct) < 2 {
+		return nil
 	}
+	var groups []hunkGroup
+	pos := map[string]int{}
+	for i, h := range hunks {
+		if gi, ok := pos[labels[i]]; ok {
+			groups[gi].indices = append(groups[gi].indices, h.Index)
+			continue
+		}
+		pos[labels[i]] = len(groups)
+		groups = append(groups, hunkGroup{section: labels[i], indices: []int{h.Index}})
+	}
+	return groups
+}
 
-	// Tier 2: gap-based fallback for undiscriminating labels.
+// groupByGap is tier 2: hunks separated by more than sectionGapThreshold
+// unchanged lines become separate groups labeled by their line span. Returns
+// nil when the file is one contiguous region, or has so many hunks that it is
+// almost certainly one mechanical change.
+func groupByGap(hunks []diff.Hunk) []hunkGroup {
 	if len(hunks) > maxGapSplitHunks {
 		return nil // scattered-many pattern: almost certainly one mechanical change
 	}
 	var groups [][]diff.Hunk
 	for i, h := range hunks {
-		if i > 0 {
-			prev := hunks[i-1]
-			prevEnd := prev.OldStart
-			if prev.OldCount > 0 {
-				prevEnd = prev.OldStart + prev.OldCount - 1
-			}
-			if h.OldStart-prevEnd > sectionGapThreshold {
-				groups = append(groups, nil)
-			}
-		} else {
+		if i == 0 || h.OldStart-hunkEnd(hunks[i-1]) > sectionGapThreshold {
 			groups = append(groups, nil)
 		}
 		groups[len(groups)-1] = append(groups[len(groups)-1], h)
@@ -254,18 +256,22 @@ func groupHunksBySection(path string, hunks []diff.Hunk) []hunkGroup {
 	}
 	out := make([]hunkGroup, 0, len(groups))
 	for _, g := range groups {
-		first, last := g[0], g[len(g)-1]
-		end := last.OldStart
-		if last.OldCount > 0 {
-			end = last.OldStart + last.OldCount - 1
-		}
-		hg := hunkGroup{section: fmt.Sprintf("lines %d-%d", first.OldStart, end)}
+		hg := hunkGroup{section: fmt.Sprintf("lines %d-%d", g[0].OldStart, hunkEnd(g[len(g)-1]))}
 		for _, h := range g {
 			hg.indices = append(hg.indices, h.Index)
 		}
 		out = append(out, hg)
 	}
 	return out
+}
+
+// hunkEnd is a hunk's last old-side line. A pure insertion (OldCount 0) has no
+// extent, so its start doubles as its end.
+func hunkEnd(h diff.Hunk) int64 {
+	if h.OldCount == 0 {
+		return h.OldStart
+	}
+	return h.OldStart + h.OldCount - 1
 }
 
 // sectionLabel trims a raw function-context line down to a short label.
