@@ -87,6 +87,7 @@ internal/
     log.go                    hc log command (per-commit hunks for rewrite)
     split.go                  hc split command (draft file-first rewrite plans)
     rewrite.go                hc rewrite command (conflict-free history splitting)
+    section.go                Hunk section attribution (declaration / import re-labeling)
     exitcodes.go              Exit 0/2/3
   diff/
     types.go                  FileDiff, Hunk, Line types
