@@ -593,7 +593,7 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 	if err != nil {
 		cr.Status = "failed"
 		cr.Error = fmt.Sprintf("git commit failed: %v", err)
-		cr.Hint = fmt.Sprintf("Staging is intact. If a pre-commit hook failed, fix the issue and run 'git commit -m \"%s\"' manually, then re-plan remaining changes.", commit.Message)
+		cr.Hint = fmt.Sprintf("Staging is intact. If a pre-commit hook failed, fix the issue and run 'git commit -m %q' manually, then re-plan remaining changes.", commit.Message)
 		// Do NOT reset staging on commit failure (leave intact for manual fix).
 		return cr
 	}
