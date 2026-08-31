@@ -205,7 +205,7 @@ func phpTestRepo(t *testing.T) *git.Runner {
 	must(t, run(r, "add", "-A"))
 	must(t, run(r, "commit", "-qm", "base"))
 	must(t, os.MkdirAll(filepath.Join(dir, "tests"), 0o755))
-	must(t, os.WriteFile(filepath.Join(dir, "tests/StoreOrderActionTest.php"), []byte(newFilePHPTests), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "tests", "StoreOrderActionTest.php"), []byte(newFilePHPTests), 0o644))
 	must(t, run(r, "add", "-A"))
 	must(t, run(r, "commit", "-qm", "test: add StoreOrderActionTest"))
 	return r
@@ -361,7 +361,7 @@ class TerminateOtherApplicationsActionTest extends TestCase
 }
 `
 	must(t, os.MkdirAll(filepath.Join(dir, "tests"), 0o755))
-	must(t, os.WriteFile(filepath.Join(dir, "tests/TerminateTest.php"), []byte(content), 0o644))
+	must(t, os.WriteFile(filepath.Join(dir, "tests", "TerminateTest.php"), []byte(content), 0o644))
 	must(t, run(r, "add", "-A"))
 	must(t, run(r, "commit", "-qm", "test: add TerminateTest"))
 
