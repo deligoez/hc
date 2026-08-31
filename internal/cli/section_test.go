@@ -65,3 +65,42 @@ func TestSignatureChangeStaysOneSection(t *testing.T) {
 		t.Errorf("signature change must not warn, got: %s", w)
 	}
 }
+
+// TestImportOnlyHunkClaimsNoSection covers the second reported shape: adding
+// a trait/import at the top of a class body plus using it in a method is one
+// idea, but git labels the import hunk with the enclosing class. Imports ride
+// with the code that needs them, so they claim no section of their own.
+func TestImportOnlyHunkClaimsNoSection(t *testing.T) {
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.php diff=php\n"), 0o644))
+
+	src := "<?php\n\nclass Command\n{\n    protected $signature = 'app:run';\n\n" +
+		"    public function handle(): int\n    {\n        $this->info('running');\n\n        return 0;\n    }\n}\n"
+	f := filepath.Join(dir, "Command.php")
+	must(t, os.WriteFile(f, []byte(src), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-m", "add Command.php"))
+
+	modified := "<?php\n\nclass Command\n{\n    use InteractsWithQueue;\n\n    protected $signature = 'app:run';\n\n" +
+		"    public function handle(): int\n    {\n        $this->dispatchQueued();\n        $this->info('running');\n\n        return 0;\n    }\n}\n"
+	must(t, os.WriteFile(f, []byte(modified), 0o644))
+
+	result, err := runDiff(r)
+	if err != nil {
+		t.Fatalf("runDiff: %v", err)
+	}
+	hunks := result.Files[0].Hunks
+	if len(hunks) != 2 {
+		t.Fatalf("want the use-line hunk plus the method hunk, got %d", len(hunks))
+	}
+	if got := hunkSectionLabel(hunks[0]); got != "" {
+		t.Errorf("import-only hunk label = %q, want no section", got)
+	}
+	if got := hunkSectionLabel(hunks[1]); got != "handle" {
+		t.Errorf("method hunk label = %q, want handle", got)
+	}
+	if w := multiSectionWarning(singleCommitPlan("Command.php", 0, 1), result.Files); w != "" {
+		t.Errorf("an import riding with its method must not warn, got: %s", w)
+	}
+}
