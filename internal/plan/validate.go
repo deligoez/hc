@@ -17,11 +17,6 @@ import (
 func ValidateFields(p *Plan) error {
 	// Track per-file: which commits use full-file, which use hunk-select,
 	// and which (commitIdx, hunkIdx) pairs are assigned.
-	type hunkKey struct {
-		commitIdx int
-		hunkIdx   int
-	}
-
 	// fullFileCommits[path] = list of commit indices using full-file mode
 	fullFileCommits := make(map[string][]int)
 	// hunkSelectCommits[path] = list of commit indices using hunk-select mode
