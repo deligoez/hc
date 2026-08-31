@@ -1,0 +1,83 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
+    - misspell
+    - unconvert
+    - unparam
+    # Complexity. hc measured the worst profile of the Go repos here (mean
+    # cognitive 6.29 against tp's 2.80), so these two are the point of the file
+    # rather than an afterthought.
+    - gocognit
+    - funlen
+    - dupl
+
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      settings:
+        hugeParam:
+          # diff.Hunk is 96 bytes and is passed by value throughout, which is
+          # deliberate: hunks are read-only values and copying one is cheaper
+          # than the aliasing bugs a pointer invites in the staging path.
+          sizeThreshold: 128
+    errcheck:
+      disable-default-exclusions: false
+      exclude-functions:
+        - (*os.File).Close
+        - os.Remove
+        - os.RemoveAll
+        - os.Chdir
+        - (*github.com/fatih/color.Color).Fprintf
+        - (*github.com/fatih/color.Color).Fprintln
+        # hc writes only to stdout/stderr through these. A failed console
+        # write is unactionable -- the process is on its way to an exit code
+        # already -- and hc never writes a FILE through fmt (staged content
+        # goes through git hash-object).
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*github.com/deligoez/hc/internal/output.Printer).PrintJSON
+    gocognit:
+      min-complexity: 25
+    funlen:
+      lines: 100
+      statements: 60
+    dupl:
+      threshold: 150
+
+  exclusions:
+    rules:
+      # Test code is measured and it is NOT the problem: hc's two most complex
+      # functions are the property tests (cognitive 94 and 71), which are the
+      # most valuable code in the repo, and every clone found at threshold 150
+      # was in a _test.go file. Left on, these three linters would only ever
+      # complain about tests.
+      - path: _test\.go
+        linters: [gocognit, funlen, dupl]
+
+# golangci-lint v2 only runs formatters listed here. Without this block a
+# gofmt-dirty file passes the quality gate silently.
+formatters:
+  enable:
+    - gofmt
+
+run:
+  timeout: 5m
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+  # Default true, which hides every funlen finding behind the gocognit one on
+  # the same declaration line -- the two say different things about the same
+  # function and both are worth reading.
+  uniq-by-line: false
