@@ -49,7 +49,7 @@ measurement to get right:
 |------|------|-----|
 | `deadcode -test ./...` | In the gate (`scripts/deadcode.sh`) | Fails on code nothing reaches at all. golangci-lint's `unused` skips exported identifiers by design, so an exported function with zero callers passes it; `deadcode` builds a call graph and does not care about case |
 | `deadcode ./...` | End of an implementation phase, **diffed against the previous run** | Reports test-only code; never in the gate, where it would fail on work in progress |
-| `govulncheck ./...` | Before every release | Reports only vulnerabilities the code actually calls |
+| `govulncheck ./...` | Automated in `.github/workflows/vuln.yml` (push, PR, and weekly); run it locally when you want the answer sooner | Reports only vulnerabilities the code actually calls. Deliberately NOT in the gate: it depends on an external database, so it can turn red on a tree nobody touched, and the gate must mean "your commit is broken" |
 | `gremlins unleash ./internal/<pkg>` | Before a release, and whenever a claim is made about test quality | Mutation testing. Pass ONE package (`./internal/plan`), not `./internal/plan/...` -- gremlins appends `/...` itself |
 
 **NEVER pass `--test-cpu`. It silently falsifies the result.** gremlins passes
