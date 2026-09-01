@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/deligoez/hc/internal/output"
@@ -45,6 +46,18 @@ func TestPartialResultOnExecutionFailure(t *testing.T) {
 	}
 	if result.Commits[1].Status != "failed" {
 		t.Errorf("commit 1 should be failed, got %+v", result.Commits[1])
+	}
+	// A rejected commit leaves hc's staging in the index, so the recovery is
+	// to clear it and resume -- never to commit by hand, which moves HEAD and
+	// makes --continue refuse the record.
+	if !strings.Contains(result.Commits[1].Hint, "git reset HEAD") {
+		t.Errorf("hint should name the staging hc left behind, got %q", result.Commits[1].Hint)
+	}
+	if strings.Contains(result.Commits[1].Hint, "manually") {
+		t.Errorf("hint must not send the agent to commit by hand, got %q", result.Commits[1].Hint)
+	}
+	if !strings.Contains(result.Hint, "--continue") {
+		t.Errorf("top-level hint should offer --continue, got %q", result.Hint)
 	}
 	if result.Code != 3 {
 		t.Errorf("result.Code = %d, want 3", result.Code)
