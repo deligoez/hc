@@ -52,16 +52,52 @@ measurement to get right:
 | `govulncheck ./...` | Before every release | Reports only vulnerabilities the code actually calls |
 | `gremlins unleash ./internal/<pkg>` | Before a release, and whenever a claim is made about test quality | Mutation testing. Pass ONE package (`./internal/plan`), not `./internal/plan/...` -- gremlins appends `/...` itself |
 
-**Calibrate gremlins or its output is noise.** On default settings
-`internal/plan` reports 0% efficacy with 24 mutants timing out; with
-`--timeout-coefficient 50` the same tree reports 100%. Sweep 10/50/200 and use
-the value where the result stops moving. Always pass `--workers <n>`: unpinned,
-gremlins drove this machine's load average from 8 to 177 and manufactured most
-of its own timeouts, and two unpinned runs of the same tree do not compare.
+**NEVER pass `--test-cpu`. It silently falsifies the result.** gremlins passes
+`-cpu N` to `exec.Command` as a single argument, so `go test` dies on an
+unrecognised flag, the test binary never starts, the exit code is non-zero, and
+gremlins scores **every mutant KILLED**. Measured here on one tree with one
+known survivor:
+
+```
+--workers 4        Killed 29  Lived 1  96.67%   (finds validate.go:197)
+--test-cpu 2       Killed 30  Lived 0  100.00%  (finds nothing, reports perfection)
+```
+
+**Read `Lived: 0` next to `100.00%` as a suspect run, not a good one.** Confirm
+a real 100% the way this repo's was confirmed: apply a mutation by hand and
+watch the suite go red. Upstream fix is PR #273, in no release yet.
+
+**Calibrate the timeout coefficient, or the output is noise.** On default
+settings `internal/plan` reports 0% efficacy with 24 mutants timing out; at
+`--timeout-coefficient 50` the same tree reports 100%. The coefficient is the
+price of one hung mutant, so it usually dominates the run -- more than
+`--workers` or package scope. The criterion for lowering it is NOT "efficacy
+stopped moving": that hides the real risk, which is a **false kill** when a slow
+but passing test gets cut off and reads as detection. The criterion is: does any
+mutant that LIVED at the high coefficient become TIMED OUT at the low one? Diff
+the two `-o` files on file+line+column+mutator; the answer must be zero.
+
+**Always pass `--workers <n>`.** Unpinned, gremlins drove this machine's load
+average from 8 to 177 and manufactured most of its own timeouts; two unpinned
+runs of the same tree do not compare. For the same reason, never let two runs
+overlap -- check `pgrep -x gremlins` first. Use `-x`, not `-f`: `pgrep -f
+'gremlins unleash'` matches the waiting shell's own command line and loops
+forever.
+
+**`-o <file>` makes classification mechanical.** It writes `file_name`, `line`,
+`column`, `type` and `status` per mutant, so "what is new since last round" is a
+set difference rather than a squint.
+
+**`-D/--diff` does not work in this version -- do not reach for it.** Measured:
+on a clean tree, `-D master` (an empty diff, so zero mutants expected) mutated
+the whole package, 30 mutants. Narrow by package instead, which is not an
+approximation but an exact equivalence: in default mode gremlins runs only the
+mutated package's own tests, so an unchanged package's verdicts cannot change.
+The same fact means efficacy UNDERSTATES detection -- package B's tests
+exercising package A never count toward A's mutants.
+
 Cost, measured: `internal/plan` is 30 mutants in ~4s; `internal/cli` is 426
 mutants in ~16 minutes. That is a release-time check, not a per-commit gate.
-`-D/--diff <branch>` scopes mutation to changed code and would make it a
-per-task check -- untried here.
 
 **A surviving mutant is not a score to drive down.** Classify it: an equivalent
 mutant nothing can observe, an undocumented boundary, or a documented contract
