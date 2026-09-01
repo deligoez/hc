@@ -76,3 +76,23 @@ func TestExecReportsLockContentionAfterTheBudget(t *testing.T) {
 		t.Errorf("error should carry git's own message, got: %v", le)
 	}
 }
+
+func TestExecDoesNotRetryOrdinaryFailures(t *testing.T) {
+	// A budget long enough that retrying would be unmistakable in the clock.
+	t.Setenv("HC_LOCK_TIMEOUT", "10s")
+	r := newTestRepo(t)
+
+	start := time.Now()
+	_, err := r.Run("rev-parse", "--verify", "nonexistent-ref")
+	if err == nil {
+		t.Fatal("expected an error for a nonexistent ref")
+	}
+
+	var le *LockError
+	if errors.As(err, &le) {
+		t.Fatalf("a plain failure was classified as lock contention: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("returned after %s; a failure git will never recover from must not be retried", elapsed)
+	}
+}
