@@ -68,7 +68,7 @@ func (r *Runner) exec(stdin []byte, args ...string) (string, error) {
 
 // start runs the command once and returns stdout and stderr separately, so
 // exec can classify the failure before deciding whether to repeat it.
-func (r *Runner) start(stdin []byte, args ...string) (string, string, error) {
+func (r *Runner) start(stdin []byte, args ...string) (stdout, stderr string, err error) {
 	cmd := exec.Command("git", args...)
 	if r.Dir != "" {
 		cmd.Dir = r.Dir
@@ -78,11 +78,11 @@ func (r *Runner) start(stdin []byte, args ...string) (string, string, error) {
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), strings.TrimSpace(stderr.String()), err
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	return outBuf.String(), strings.TrimSpace(errBuf.String()), err
 }
 
 // EnsureRepo checks that we are inside a git repository.
