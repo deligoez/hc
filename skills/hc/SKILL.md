@@ -300,6 +300,7 @@ Common validation errors:
 - `hunks [...] not assigned to any commit` / `has changes but is not in the plan` -- add the listed hunks/file to a commit or use `allow_unplanned`.
 - `hunk index N out of range` -- the diff changed since you read it. Re-run `hc diff --json` and re-plan.
 - `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is left intact: fix the issue, run `git commit -m "<message>"` manually, then re-plan the rest.
+- `Unable to create '<path>/index.lock': File exists` (exit 3) -- another git process held the repository lock for the whole 2 s hc retries. The plan was never wrong: wait for that process (an editor, another agent) to finish and re-plan the rest, or raise the budget with `HC_LOCK_TIMEOUT=10s`.
 
 ## Key Commands
 
