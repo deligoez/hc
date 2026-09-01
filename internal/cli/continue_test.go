@@ -134,3 +134,35 @@ func TestContinueRefusesAfterHeadMoved(t *testing.T) {
 		t.Errorf("a refusal that changes no git state is exit 2, got %d", acErr.Code)
 	}
 }
+
+// TestContinueRefusesWhatItCannotResume covers the guards on the way in, each
+// of which would otherwise fail later and less clearly.
+func TestContinueRefusesWhatItCannotResume(t *testing.T) {
+	_, r := setupRepo(t)
+
+	cases := []struct {
+		name   string
+		args   []string
+		prefix string
+		want   string
+	}{
+		{"nothing to continue", nil, "", "no interrupted run to continue"},
+		{"a plan argument as well", []string{"plan.json"}, "", "takes no plan argument"},
+		{"a prefix of its own", nil, "WB-1234: ", "--prefix cannot be combined"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, acErr := runInput(tc.args, true, tc.prefix, r)
+			if acErr == nil {
+				t.Fatalf("want a refusal for %s", tc.name)
+			}
+			if !strings.Contains(acErr.Message, tc.want) {
+				t.Errorf("error %q should contain %q", acErr.Message, tc.want)
+			}
+			if acErr.Code != 2 {
+				t.Errorf("code = %d, want 2", acErr.Code)
+			}
+		})
+	}
+}
