@@ -94,6 +94,7 @@ The agent never touches `git add`, `git apply`, or `git commit` directly.
 | `hc run <plan>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc run --continue` | Finish a plan a stopped run left part-way |
 | `hc plan` | Draft working-tree plan (file-first + section-split, TODO messages) |
 | `hc log <base>..<head>` | Per-commit indexed hunks (`--files-only` for a cheap survey) |
 | `hc split <base>..<head>` | Emit a draft one-file-per-commit rewrite plan |
