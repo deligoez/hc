@@ -140,7 +140,7 @@ Each split must reproduce the original commit's tree byte-for-byte (verified), s
 **Two-phase execution:**
 
 - **Phase 1 (Validation):** Parse plan, capture diff, validate coverage, sequential dry-run with temporary index. If anything fails: exit 2, no git state changed.
-- **Phase 2 (Execution):** For each commit: reconstruct the staged file content from the original diff, stage it directly into the index, commit.
+- **Phase 2 (Execution):** For each commit: reconstruct the staged file content from the original diff, stage it directly into the index, commit. A resume record (`hc-run-state.json`, in the per-worktree git directory) holds the plan and the commits made so far, and is deleted when the plan completes -- it is what `hc run --continue` reads, and why a resumed run can re-derive the ORIGINAL diff instead of re-diffing an index that has moved on.
 
 **Key algorithms:**
 - Content reconstruction: staged content is rebuilt from the original diff coordinates (base blob + selected hunks) and staged directly via `git hash-object` + `git update-index` -- no patch application, no hunk re-matching
