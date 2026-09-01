@@ -18,6 +18,16 @@ func (r *Runner) Commit(message string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// Head returns the full SHA of HEAD. It fails in a repository whose first
+// commit does not exist yet, which callers read as "there is no base commit".
+func (r *Runner) Head() (string, error) {
+	out, err := r.Run("rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // Add stages a file.
 func (r *Runner) Add(path string) error {
 	_, err := r.Run("add", "--", path)
