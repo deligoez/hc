@@ -72,6 +72,11 @@ func TestExecReportsLockContentionAfterTheBudget(t *testing.T) {
 	if le.Waited <= 0 {
 		t.Errorf("reported no wait at all: %s", le.Waited)
 	}
+	// Well under the 2s default: proves HC_LOCK_TIMEOUT was honoured rather
+	// than parsed and dropped.
+	if le.Waited > time.Second {
+		t.Errorf("waited %s on a 100ms budget -- HC_LOCK_TIMEOUT was ignored", le.Waited)
+	}
 	if !strings.Contains(le.Error(), "index.lock") {
 		t.Errorf("error should carry git's own message, got: %v", le)
 	}
