@@ -28,37 +28,31 @@ import (
 func newRunCmd() *cobra.Command {
 	var dryRun bool
 	var prefix string
+	var continueRun bool
 
 	cmd := &cobra.Command{
 		Use:   "run [plan-file | -]",
 		Short: "Execute a commit plan",
 		Long:  "Reads a JSON commit plan from a file (or stdin with \"-\") and creates atomic commits.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var planData []byte
-			var err error
-
-			if args[0] == "-" {
-				planData, err = io.ReadAll(os.Stdin)
-			} else {
-				planData, err = os.ReadFile(args[0])
-			}
-			if err != nil {
-				acErr := output.NewValidationError(
-					fmt.Sprintf("cannot read plan: %v", err),
-					"Provide a valid file path or pipe JSON via stdin with \"-\".",
-				)
-				printer.PrintError(acErr)
-				return &exitError{code: ExitValidation}
-			}
-
 			runner, acErr := newRepoRunner()
 			if acErr != nil {
 				printer.PrintError(acErr)
 				return &exitError{code: acErr.Code}
 			}
 
-			result, acErr := runPlan(planData, runner, dryRun, prefix)
+			planData, resume, acErr := runInput(args, continueRun, prefix, runner)
+			if acErr != nil {
+				printer.PrintError(acErr)
+				return &exitError{code: acErr.Code}
+			}
+			effPrefix := prefix
+			if resume != nil {
+				effPrefix = resume.Prefix
+			}
+
+			result, acErr := runPlanFrom(planData, runner, dryRun, effPrefix, resume)
 			if acErr != nil {
 				// Execution failures carry a partial result: report which
 				// commits were created (with SHAs) so the agent can re-plan
@@ -116,6 +110,7 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Validate the plan without creating commits")
 	cmd.Flags().StringVar(&prefix, "prefix", "", "Prefix prepended to every commit message (idempotent), e.g. \"WB-1234: \"")
+	cmd.Flags().BoolVar(&continueRun, "continue", false, "Finish the plan an interrupted run left part-way (takes no plan argument)")
 
 	return cmd
 }
@@ -124,17 +119,74 @@ func newRunCmd() *cobra.Command {
 // prefixOpt (from --prefix) is prepended to every commit message; prefixing
 // is idempotent. Per-commit prefixes (e.g. one ticket per commit on an
 // umbrella branch) are the plan author's job: write them into the messages.
+func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...string) (any, *output.ACError) {
+	prefix := ""
+	if len(prefixOpt) > 0 {
+		prefix = prefixOpt[0]
+	}
+	return runPlanFrom(planData, runner, dryRun, prefix, nil)
+}
+
+// runInput resolves what this invocation is about to execute: a plan read from
+// a file or stdin, or the record an interrupted run left behind.
+func runInput(args []string, continueRun bool, prefix string, runner *git.Runner) ([]byte, *runState, *output.ACError) {
+	if !continueRun {
+		if len(args) != 1 {
+			return nil, nil, output.NewValidationError(
+				"hc run needs a plan file, \"-\" for stdin, or --continue",
+				"Write a plan from 'hc diff --json', then run 'hc run plan.json'.",
+			)
+		}
+		var data []byte
+		var err error
+		if args[0] == "-" {
+			data, err = io.ReadAll(os.Stdin)
+		} else {
+			data, err = os.ReadFile(args[0])
+		}
+		if err != nil {
+			return nil, nil, output.NewValidationError(
+				fmt.Sprintf("cannot read plan: %v", err),
+				"Provide a valid file path or pipe JSON via stdin with \"-\".",
+			)
+		}
+		return data, nil, nil
+	}
+
+	if len(args) > 0 {
+		return nil, nil, output.NewValidationError(
+			"hc run --continue takes no plan argument",
+			"The plan to finish is the one the interrupted run recorded.",
+		)
+	}
+	// A different prefix would produce messages that do not match the commits
+	// the interrupted run already created, so the recorded one is the only
+	// answer; taking it silently would hide a contradiction.
+	if prefix != "" {
+		return nil, nil, output.NewValidationError(
+			"--prefix cannot be combined with --continue",
+			"The interrupted run recorded its own prefix; hc reuses that one.",
+		)
+	}
+	st, acErr := loadRunState(runner)
+	if acErr != nil {
+		return nil, nil, acErr
+	}
+	return st.Plan, st, nil
+}
+
+// runPlanFrom is runPlan with the resume record threaded through. A non-nil
+// resume changes exactly two inputs -- the diff is taken against the commit
+// the plan was written at rather than against the index, and so are the base
+// blobs -- because after a partial run the index holds commits the plan's hunk
+// indices know nothing about.
 //
 // Baselined complexity hotspot (cognitive 50): Phase 1 in full -- every
 // validation step in the order the spec fixes, each able to abort with its own
 // specific error before any git state changes.
 //
 //nolint:gocognit,funlen // measured 2026-08-31; refactor to clear, never add one
-func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...string) (any, *output.ACError) {
-	prefix := ""
-	if len(prefixOpt) > 0 {
-		prefix = prefixOpt[0]
-	}
+func runPlanFrom(planData []byte, runner *git.Runner, dryRun bool, prefix string, resume *runState) (any, *output.ACError) {
 	// --- Step 1: Ensure we are in a git repo ---
 	if err := runner.EnsureRepo(); err != nil {
 		return nil, output.NewValidationError(
@@ -208,7 +260,11 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...stri
 	}
 
 	// --- Step 5: Capture diff ---
-	rawDiff, err := runner.Diff("-U0", "--no-renames", "--no-ext-diff")
+	diffArgs := []string{"-U0", "--no-renames", "--no-ext-diff"}
+	if resume != nil {
+		diffArgs = append(diffArgs, resume.Base)
+	}
+	rawDiff, err := runner.Diff(diffArgs...)
 	if err != nil {
 		revertIntent()
 		return nil, output.NewExecutionError(
@@ -305,7 +361,11 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...stri
 	}
 
 	// --- Step 8b: Capture base content for every hunk-mode file ---
-	states, acErr := buildFileStates(p, parsedFiles, runner)
+	baseRef := ""
+	if resume != nil {
+		baseRef = resume.Base
+	}
+	states, acErr := buildFileStates(p, parsedFiles, runner, baseRef)
 	if acErr != nil {
 		revertIntent()
 		return nil, acErr
@@ -326,7 +386,16 @@ func runPlan(planData []byte, runner *git.Runner, dryRun bool, prefixOpt ...stri
 	}
 
 	// --- Phase 2: Execute the plan ---
-	result, acErr := executePlan(p, states, runner, intentAdded)
+	state := resume
+	if state == nil {
+		state, acErr = startRunState(runner, planData, prefix)
+		if acErr != nil {
+			revertIntent()
+			return nil, acErr
+		}
+	}
+
+	result, acErr := executePlan(p, states, runner, intentAdded, state)
 	if result != nil {
 		result.Warnings = warnings
 	}
@@ -441,7 +510,7 @@ func lockHint(err error) string {
 
 // buildFileStates fetches the base (index) content of every hunk-mode file in
 // the plan.
-func buildFileStates(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runner) (map[string]*fileState, *output.ACError) {
+func buildFileStates(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runner, baseRef string) (map[string]*fileState, *output.ACError) {
 	diffMap := make(map[string]*diff.FileDiff, len(parsedFiles))
 	for i := range parsedFiles {
 		diffMap[parsedFiles[i].Path] = &parsedFiles[i]
@@ -461,7 +530,7 @@ func buildFileStates(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runn
 					"",
 				)
 			}
-			base, err := runner.IndexBlob(f.Path)
+			base, err := runner.BaseBlob(baseRef, f.Path)
 			if err != nil {
 				return nil, output.NewExecutionError(
 					fmt.Sprintf("cannot read index content for %s: %v", f.Path, err),
@@ -551,11 +620,29 @@ func mergeCommitted(committed map[string]map[int]bool, c plan.Commit) {
 
 // executePlan iterates over each commit in the plan, stages the appropriate
 // hunks/files, and creates real commits. On failure it returns a partial result.
-func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner, addedNFiles []string) (*output.Result, *output.ACError) {
+func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner, addedNFiles []string, st *runState) (*output.Result, *output.ACError) {
 	result := &output.Result{Total: len(p.Commits)}
 	committed := make(map[string]map[int]bool)
 
-	for i, commit := range p.Commits {
+	// Commits a previous run already created are replayed into the result and
+	// into the committed-hunk map, never into git. Their hunks have to be in
+	// that map for the next commit to reconstruct its file from base + what is
+	// already committed + its own selection, exactly as an uninterrupted run
+	// would have.
+	done := st.count()
+	for i := range done {
+		result.Commits = append(result.Commits, output.CommitResult{
+			Index:   i,
+			Message: p.Commits[i].Message,
+			SHA:     st.SHAs[i],
+			Status:  "committed",
+		})
+		mergeCommitted(committed, p.Commits[i])
+		result.Committed++
+	}
+
+	for i := done; i < len(p.Commits); i++ {
+		commit := p.Commits[i]
 		cr := executeCommit(i, commit, states, committed, runner)
 		result.Commits = append(result.Commits, cr)
 
@@ -566,7 +653,11 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 			// the top-level fields the one thing it needs: lock contention
 			// then reads as a plan problem it should re-plan around.
 			progress := "No commits were created. Fix the issue and re-run."
-			if i > 0 {
+			switch {
+			case i == 0:
+			case st != nil:
+				progress = fmt.Sprintf("Commits 0-%d are done. Fix the cause, then 'hc run --continue' creates the rest from the same plan.", i-1)
+			default:
 				progress = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
 			}
 			result.Hint = progress
@@ -579,13 +670,16 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 			// Clean up orphaned intent-to-add files.
 			cleanupOrphanedIntentToAdd(runner, addedNFiles)
 
+			// The record stays behind on purpose: it is what --continue reads.
 			return result, output.NewExecutionError(cr.Error, result.Hint)
 		}
 
 		mergeCommitted(committed, commit)
 		result.Committed++
+		st.record(runner, cr.SHA)
 	}
 
+	st.clear()
 	return result, nil
 }
 
