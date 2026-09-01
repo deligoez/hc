@@ -76,6 +76,9 @@ func TestContinueFinishesAPlanStoppedMidway(t *testing.T) {
 		t.Errorf("the resumed result should carry the original first SHA, got %q want %q",
 			result.Commits[0].SHA, first.Commits[0].SHA)
 	}
+	if len(result.Commits[0].Files) != 1 || result.Commits[0].Files[0].Strategy != "hunks" {
+		t.Errorf("a replayed commit should still describe its files, got %+v", result.Commits[0].Files)
+	}
 	got := readGitLog(t, dir)
 	if tail := strings.Join(got[len(got)-3:], ","); tail != "first,second,third" {
 		t.Fatalf("want the plan's three commits in order, got %v", got)
