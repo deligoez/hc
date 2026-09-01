@@ -170,7 +170,11 @@ func TestRunWithStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunWithStdin: %v", err)
 	}
-	if strings.TrimSpace(out) == "" {
-		t.Fatal("expected object hash on stdout")
+	// The blob hash of "hello\n", not merely "some hash": a command that
+	// silently inherited the parent's stdin would read empty and still print
+	// a perfectly good hash of the wrong thing.
+	const helloBlob = "ce013625030ba8dba906f756967f9e9ca394464a"
+	if got := strings.TrimSpace(out); got != helloBlob {
+		t.Fatalf("hashed %q, want the blob of \"hello\\n\" (%s)", got, helloBlob)
 	}
 }
