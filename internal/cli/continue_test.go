@@ -96,3 +96,41 @@ func TestContinueFinishesAPlanStoppedMidway(t *testing.T) {
 		t.Error("the resume record should be gone once the plan is complete")
 	}
 }
+
+// TestContinueRefusesAfterHeadMoved guards the one thing that makes a stale
+// record safe to keep on disk. The spec's recovery for a rejected commit is to
+// fix it and commit by hand -- which moves HEAD, so the record's commit count
+// no longer describes the history. Continuing then would recreate a commit
+// that already exists.
+func TestContinueRefusesAfterHeadMoved(t *testing.T) {
+	t.Setenv("HC_LOCK_TIMEOUT", "50ms")
+
+	dir, r := setupRepo(t)
+	writeFile(t, dir, "a.txt", "a\n")
+	writeFile(t, dir, "b.txt", "b\n")
+	gitHelper(t, dir, "add", "-A")
+	gitHelper(t, dir, "commit", "-m", "base")
+	writeFile(t, dir, "a.txt", "a2\n")
+	writeFile(t, dir, "b.txt", "b2\n")
+
+	letItRun := stopAfterFirstCommit(t, dir)
+	if _, acErr := runPlan([]byte(`{"commits":[
+		{"message":"first","files":[{"path":"a.txt"}]},
+		{"message":"second","files":[{"path":"b.txt"}]}]}`), r, false); acErr == nil {
+		t.Fatal("want the run to stop part-way")
+	}
+	letItRun()
+
+	gitHelper(t, dir, "commit", "--allow-empty", "-m", "by hand")
+
+	_, acErr := loadRunState(r)
+	if acErr == nil {
+		t.Fatal("continuing past a moved HEAD must be refused")
+	}
+	if !strings.Contains(acErr.Message, "HEAD has moved") {
+		t.Errorf("the error should name the moved HEAD, got %q", acErr.Message)
+	}
+	if acErr.Code != 2 {
+		t.Errorf("a refusal that changes no git state is exit 2, got %d", acErr.Code)
+	}
+}
