@@ -1,8 +1,10 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,5 +45,34 @@ func TestExecRetriesUntilTheLockIsReleased(t *testing.T) {
 
 	if elapsed := time.Since(start); elapsed < held {
 		t.Fatalf("Add succeeded after %s, before the lock was released -- it cannot have retried", elapsed)
+	}
+}
+
+func TestExecReportsLockContentionAfterTheBudget(t *testing.T) {
+	// git translates the lockfile error, and tr_TR moves the quotes around
+	// the path, so a text match written against English would miss it. hc
+	// pins LC_ALL=C to keep that from happening; this asserts the pinning
+	// holds. Where the locale is not installed git answers in English anyway
+	// and the test still passes -- it can only get stronger, never flaky.
+	t.Setenv("LC_ALL", "tr_TR.UTF-8")
+	t.Setenv("LANGUAGE", "tr")
+	t.Setenv("HC_LOCK_TIMEOUT", "100ms")
+
+	r := newTestRepo(t)
+	plantIndexLock(t, r)
+
+	_, err := r.Run("update-index", "--force-remove", "--", "base.txt")
+	var le *LockError
+	if !errors.As(err, &le) {
+		t.Fatalf("expected a *LockError, got %T: %v", err, err)
+	}
+	if le.Attempts < 2 {
+		t.Errorf("gave up after %d attempt(s); the budget allows more", le.Attempts)
+	}
+	if le.Waited <= 0 {
+		t.Errorf("reported no wait at all: %s", le.Waited)
+	}
+	if !strings.Contains(le.Error(), "index.lock") {
+		t.Errorf("error should carry git's own message, got: %v", le)
 	}
 }
