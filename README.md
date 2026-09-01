@@ -168,8 +168,10 @@ npx skills add -g deligoez/hc
 Update after new releases:
 
 ```bash
-npx skills update -g deligoez/hc
+npx skills update -g hc   # or `npx skills update -g` for every global skill
 ```
+
+`update` takes skill NAMES, not the package path `add` takes -- `npx skills update -g deligoez/hc` reports `No installed skills found`.
 
 ## License
 
