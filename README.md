@@ -155,7 +155,7 @@ Each split must reproduce the original commit's tree byte-for-byte (verified), s
 | 2 | Validation error (plan issue, no git state changed) |
 | 3 | Execution error (unexpected git failure) |
 
-All errors include `error`, `code`, and `hint` fields for agent consumption. On exit 3 the full result is still printed -- every commit with its `status` and `sha` -- so the caller can re-plan only the remaining changes.
+All errors include `error`, `code`, and `hint` fields for agent consumption. On exit 3 the full result is still printed -- every commit with its `status` and `sha` -- and `hc run --continue` creates the rest of the same plan from the same hunk indices, so a run that stopped part-way does not mean rewriting the plan. Writing a new plan is only needed when hc refuses to resume: HEAD moved since it stopped, or clearing the cause edited a file the plan covers.
 
 hc is rarely the only git process in a repository an agent is working in, so a command that loses the race for `index.lock` is retried (backing off to a 2 s total) rather than failing the plan. `HC_LOCK_TIMEOUT` -- any Go duration -- raises that budget; `0` disables the retry.
 
