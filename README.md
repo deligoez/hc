@@ -156,6 +156,8 @@ Each split must reproduce the original commit's tree byte-for-byte (verified), s
 
 All errors include `error`, `code`, and `hint` fields for agent consumption. On exit 3 the full result is still printed -- every commit with its `status` and `sha` -- so the caller can re-plan only the remaining changes.
 
+hc is rarely the only git process in a repository an agent is working in, so a command that loses the race for `index.lock` is retried (backing off to a 2 s total) rather than failing the plan. `HC_LOCK_TIMEOUT` -- any Go duration -- raises that budget; `0` disables the retry.
+
 ## Claude Code Skill
 
 ```bash
