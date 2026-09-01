@@ -46,7 +46,7 @@ hc run - <<'PLAN'
 PLAN
 ```
 
-`hc run` is atomic at the plan level: the whole plan is validated (including a simulated apply of every commit) before the first real commit is created. A validation failure means nothing changed -- fix the plan and retry. `--dry-run` exists but is rarely needed; `hc run` performs the same validation anyway.
+`hc run` is atomic at the plan level: the whole plan is validated (including a simulated apply of every commit) before the first real commit is created. A validation failure means nothing changed -- fix the plan and retry. `--dry-run` exists but is rarely needed; `hc run` performs the same validation anyway. If a run does stop part-way (exit 3 -- a lock, a hook, external interference), do NOT rewrite the plan: `hc run --continue` finishes it. See *Error Recovery*.
 
 ## Reading the diff
 
@@ -293,14 +293,25 @@ Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you
 | Exit | Meaning | Recovery |
 |------|---------|----------|
 | 2 | Validation error. **No git state changed.** | Fix the plan per the `hint`, retry the same `hc run`. |
-| 3 | Execution error mid-plan. Some commits may exist. | The JSON result lists every commit with `status` and `sha` -- committed ones are done. Fix the cause, then `hc run --continue`: it finishes the SAME plan with the SAME hunk indices, no rewriting. Re-plan from `hc diff --json` only when the fix changed the working tree, or hc says HEAD has moved. |
+| 3 | Execution error mid-plan. Some commits exist. | Do NOT rewrite the plan -- follow the four steps below. |
+
+**After exit 3 the recovery is mechanical.** The commits already created stay created, and `hc run --continue` finishes the rest of the SAME plan with the SAME hunk indices: hc re-derives the original diff from the commit the plan was written against, so index 1 still means the hunk you assigned to index 1.
+
+1. Read `commits[]` -- entries with `"status": "committed"` are done, with their SHAs.
+2. Clear what the `hint` names: wait out a lock, fix the pre-commit hook, free the disk.
+3. Run `git reset HEAD` **if a `git commit` failed** -- hc deliberately leaves that staging in place, and `--continue` needs a clean index. (A staging failure already reset it; nothing to do.)
+4. `hc run --continue` -- no plan argument, no `--prefix`; both come from the record the stopped run left behind.
+
+**Never commit manually to "finish" the failed commit.** That moves HEAD, `--continue` refuses a record whose HEAD moved, and you are back to rewriting the plan by hand -- exactly what `--continue` exists to avoid.
+
+Re-plan from `hc diff --json` only when hc refuses with `HEAD has moved since the interrupted run stopped`, or with `working tree content of <file> does not match the captured diff` (fixing the cause edited a file the plan covers).
 
 Common validation errors:
 - `staging area is not clean` -- something is pre-staged. Run `git reset HEAD`, then retry.
 - `hunks [...] not assigned to any commit` / `has changes but is not in the plan` -- add the listed hunks/file to a commit or use `allow_unplanned`.
 - `hunk index N out of range` -- the diff changed since you read it. Re-run `hc diff --json` and re-plan.
-- `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is left intact: fix the issue, run `git commit -m "<message>"` manually, then re-plan the rest.
-- `Unable to create '<path>/index.lock': File exists` (exit 3) -- another git process held the repository lock for the whole 2 s hc retries. The plan was never wrong: wait for that process (an editor, another agent) to finish, then `hc run --continue`. Raise the budget with `HC_LOCK_TIMEOUT=10s` if it keeps happening.
+- `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is intact; follow the four steps above.
+- `Unable to create '<path>/index.lock': File exists` (exit 3) -- another git process (an editor, another agent, a background indexer) held the repository lock for the whole 2 s hc retries. The plan was never wrong: wait for that process, then continue. Raise the budget with `HC_LOCK_TIMEOUT=10s` if it keeps happening.
 
 ## Key Commands
 
