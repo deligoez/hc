@@ -636,6 +636,7 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 			Message: p.Commits[i].Message,
 			SHA:     st.SHAs[i],
 			Status:  "committed",
+			Files:   planFileResults(p.Commits[i]),
 		})
 		mergeCommitted(committed, p.Commits[i])
 		result.Committed++
@@ -656,7 +657,7 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 			switch {
 			case i == 0:
 			case st != nil:
-				progress = fmt.Sprintf("Commits 0-%d are done. Fix the cause, then 'hc run --continue' creates the rest from the same plan.", i-1)
+				progress = fmt.Sprintf("Commits 0-%d are done; once the cause is fixed, 'hc run --continue' creates the rest from the same plan.", i-1)
 			default:
 				progress = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
 			}
@@ -681,6 +682,22 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 
 	st.clear()
 	return result, nil
+}
+
+// planFileResults describes a commit's files the way executeCommit reports
+// them. A commit a previous run created is only replayed into the result, so
+// its file list has to come from the plan rather than from having staged it.
+func planFileResults(c plan.Commit) []output.FileResult {
+	files := make([]output.FileResult, 0, len(c.Files))
+	for _, f := range c.Files {
+		fr := output.FileResult{Path: f.Path, Strategy: "full"}
+		if !f.IsFullFile() {
+			fr.Strategy = "hunks"
+			fr.Hunks = f.Hunks
+		}
+		files = append(files, fr)
+	}
+	return files
 }
 
 // executeCommit stages files for a single commit and creates it.
