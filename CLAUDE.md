@@ -63,9 +63,27 @@ known survivor:
 --test-cpu 2       Killed 30  Lived 0  100.00%  (finds nothing, reports perfection)
 ```
 
-**Read `Lived: 0` next to `100.00%` as a suspect run, not a good one.** Confirm
-a real 100% the way this repo's was confirmed: apply a mutation by hand and
-watch the suite go red. Upstream fix is PR #273, in no release yet.
+**The sharp tell is `Not covered > 0` next to `Lived: 0`, which cannot happen
+honestly.** A tree carrying mutants no test reaches is a tree whose tests are
+not exhaustive, so something should have survived. `Lived: 0` beside `100.00%`
+is NOT the tell on its own -- a genuinely exhaustive package produces it
+honestly, and `internal/plan` here does.
+
+Broken mode also zeroes `Timed out`, and the arithmetic closes it: measured
+across two runs of one package, `83 + 5 + 3 = 91` -- the broken run's KILLED is
+exactly the honest run's KILLED + LIVED + TIMED OUT. NOT COVERED is untouched
+because the coverage profile is collected BEFORE any mutant runs, so it never
+reaches the failing `exec`.
+
+Two corollaries worth keeping:
+
+- A run reporting `Lived: N` for N > 0 is proof the harness really ran, since
+  broken mode has no surviving category left to report.
+- Confirm a real 100% the way this repo's was: apply a mutation by hand and
+  watch the suite go red. `ValidateCoverage`'s `>=` to `>` fails
+  `TestValidateCoverage_HunkOnePastTheEnd`, so the number here is earned.
+
+Upstream fix is PR #273, in no release yet.
 
 **Calibrate the timeout coefficient, or the output is noise.** On default
 settings `internal/plan` reports 0% efficacy with 24 mutants timing out; at
