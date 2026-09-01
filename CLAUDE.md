@@ -276,6 +276,8 @@ spec/0.2.0.md                 Full specification
 - `--no-renames` on diff calls: renames are committed as delete+add (detection-at-run-time silently dropped old-path deletions from coverage)
 - Tests use real git repos via `t.TempDir()`
 - All validation errors revert `git add -N` operations before returning
+- Every git command runs with `LC_ALL=C`. git's lockfile error is translated and the translation moves the punctuation: under `tr_TR.UTF-8` the path comes back in double quotes, which is enough for the retry matcher to miss it and silently disable the retry for exactly the users most likely to hit it
+- A command that loses the race for `index.lock` is retried in `internal/git/lock.go` (20 ms to 400 ms with jitter, 2 s total, `HC_LOCK_TIMEOUT` to override). The gate is git's "unable to create the lock" error and nothing else -- that error proves the command never touched the index, which is the only reason repeating it is safe
 
 ## Dependencies
 
