@@ -55,4 +55,9 @@ func TestLockContentionMidPlanIsNamedInTheHint(t *testing.T) {
 	if !strings.Contains(failed.Hint, "repository lock") {
 		t.Errorf("hint must name lock contention rather than blame the plan, got %q", failed.Hint)
 	}
+	// A caller that reads only the top-level fields must see the cause too,
+	// not just how far the plan got.
+	if !strings.Contains(result.Hint, "repository lock") || !strings.Contains(result.Hint, "Commits 0-0 are done") {
+		t.Errorf("top-level hint must carry the cause before the progress, got %q", result.Hint)
+	}
 }
