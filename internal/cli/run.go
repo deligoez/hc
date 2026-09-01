@@ -502,8 +502,11 @@ func lockHint(err error) string {
 	if !errors.As(err, &le) {
 		return ""
 	}
+	// Says how to clear the obstacle and stops there: how to pick the plan up
+	// afterwards is the progress half's job (see executePlan). Two recovery
+	// recipes in one hint is worse than either.
 	return fmt.Sprintf(
-		"Another git process held the repository lock; hc retried for %s. Wait for that process to finish (or remove the lock file if none is running) and re-run.",
+		"Another git process held the repository lock; hc retried for %s. Wait for that process to finish (or remove the lock file if none is running) before continuing.",
 		le.Waited.Round(100*time.Millisecond),
 	)
 }
@@ -657,7 +660,7 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 			switch {
 			case i == 0:
 			case st != nil:
-				progress = fmt.Sprintf("Commits 0-%d are done; once the cause is fixed, 'hc run --continue' creates the rest from the same plan.", i-1)
+				progress = fmt.Sprintf("Commits 0-%d are done; 'hc run --continue' then creates the rest from the same plan.", i-1)
 			default:
 				progress = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
 			}
@@ -755,7 +758,10 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 	if err != nil {
 		cr.Status = "failed"
 		cr.Error = fmt.Sprintf("git commit failed: %v", err)
-		cr.Hint = fmt.Sprintf("Staging is intact. If a pre-commit hook failed, fix the issue and run 'git commit -m %q' manually, then re-plan remaining changes.", commit.Message)
+		// NOT "commit it by hand": that moves HEAD, and --continue refuses a
+		// record whose HEAD moved. Clearing the staging hc left behind is what
+		// makes the plan resumable.
+		cr.Hint = "Staging is intact -- hc's staging for this commit is still in the index. Fix the cause (usually a pre-commit hook), then 'git reset HEAD'."
 		if lh := lockHint(err); lh != "" {
 			cr.Hint = "Staging is intact. " + lh
 		}
