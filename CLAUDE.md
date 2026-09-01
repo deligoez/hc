@@ -174,6 +174,7 @@ Agent  --writes-->  plan.json  --stdin/file-->  hc  --git calls-->  repository
 | `hc run <plan.json>` | Execute commit plan from file |
 | `hc run -` | Execute commit plan from stdin |
 | `hc run --dry-run <plan>` | Validate plan without committing |
+| `hc run --continue` | Finish a plan a stopped run left part-way (same plan, same hunk indices) |
 | `hc plan` | Draft working-tree plan (file-first + section-split; TODO messages rejected by run) |
 | `hc log <base>..<head>` | Per-commit indexed hunks (`--files-only` = survey mode) |
 | `hc split <base>..<head>` | Emit a draft one-file-per-commit rewrite plan |
@@ -212,6 +213,7 @@ internal/
     diff.go                   hc diff command
     plancmd.go                hc plan command (draft working-tree plans)
     run.go                    hc run command (Phase 1 + Phase 2)
+    runstate.go               Resume record behind hc run --continue
     log.go                    hc log command (per-commit hunks for rewrite)
     split.go                  hc split command (draft file-first rewrite plans)
     rewrite.go                hc rewrite command (conflict-free history splitting)
