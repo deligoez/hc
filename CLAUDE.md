@@ -55,8 +55,8 @@ measurement to get right:
 **NEVER pass `--test-cpu`. It silently falsifies the result.** gremlins passes
 `-cpu N` to `exec.Command` as a single argument, so `go test` dies on an
 unrecognised flag, the test binary never starts, the exit code is non-zero, and
-gremlins scores **every mutant KILLED**. Measured here on one tree with one
-known survivor:
+gremlins scores **every runnable mutant as not-surviving**. Measured here on one
+tree with one known survivor:
 
 ```
 --workers 4        Killed 29  Lived 1  96.67%   (finds validate.go:197)
@@ -69,11 +69,18 @@ not exhaustive, so something should have survived. `Lived: 0` beside `100.00%`
 is NOT the tell on its own -- a genuinely exhaustive package produces it
 honestly, and `internal/plan` here does.
 
-Broken mode also zeroes `Timed out`, and the arithmetic closes it: measured
-across two runs of one package, `83 + 5 + 3 = 91` -- the broken run's KILLED is
-exactly the honest run's KILLED + LIVED + TIMED OUT. NOT COVERED is untouched
-because the coverage profile is collected BEFORE any mutant runs, so it never
-reaches the failing `exec`.
+**Do not build the detector on which bucket the mutants land in -- that part is
+machine-dependent.** On this machine they all became KILLED, and the arithmetic
+closed on a second repo's package: `83 + 5 + 3 = 91`, the broken run's KILLED
+equalling the honest run's KILLED + LIVED + TIMED OUT. On a third machine the
+same flag turned 47 KILLED and 5 LIVED into 52 TIMED OUT instead -- same false
+100%, opposite shape. Someone hunting the KILLED signature there would have read
+52 timeouts as a loaded machine and moved on.
+
+What IS portable is that NOT COVERED never moves, because the coverage profile
+is collected BEFORE any mutant runs and so never reaches the failing `exec`.
+That is the whole reason the tell above is the one to use: it rests on the only
+part of the shape that survives the change of machine.
 
 Two corollaries worth keeping:
 
