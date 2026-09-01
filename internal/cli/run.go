@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -421,6 +423,22 @@ type stageError struct {
 	hint string
 }
 
+// lockHint explains a git failure hc could not retry away: another process
+// held the repository lock for the whole retry budget. It returns "" for every
+// other failure, so each call site keeps its own hint. Without this the agent
+// reads a bare "cannot stage x: fatal: Unable to create ...index.lock" as a
+// plan problem and rebuilds a plan that was never wrong.
+func lockHint(err error) string {
+	var le *git.LockError
+	if !errors.As(err, &le) {
+		return ""
+	}
+	return fmt.Sprintf(
+		"Another git process held the repository lock; hc retried for %s. Wait for that process to finish (or remove the lock file if none is running) and re-run.",
+		le.Waited.Round(100*time.Millisecond),
+	)
+}
+
 // buildFileStates fetches the base (index) content of every hunk-mode file in
 // the plan.
 func buildFileStates(p *plan.Plan, parsedFiles []diff.FileDiff, runner *git.Runner) (map[string]*fileState, *output.ACError) {
@@ -472,7 +490,7 @@ func stageHunkSelection(r *git.Runner, path string, st *fileState, committed map
 	// it stages the deletion itself, not an empty file.
 	if fd.IsDeleted {
 		if err := r.RemoveFromIndex(path); err != nil {
-			return &stageError{msg: fmt.Sprintf("cannot stage deletion of %s: %v", path, err)}
+			return &stageError{msg: fmt.Sprintf("cannot stage deletion of %s: %v", path, err), hint: lockHint(err)}
 		}
 		return nil
 	}
@@ -511,7 +529,7 @@ func stageHunkSelection(r *git.Runner, path string, st *fileState, committed map
 	}
 
 	if err := r.StageBlob(mode, sha, path); err != nil {
-		return &stageError{msg: fmt.Sprintf("cannot stage %s: %v", path, err)}
+		return &stageError{msg: fmt.Sprintf("cannot stage %s: %v", path, err), hint: lockHint(err)}
 	}
 	return nil
 }
@@ -580,6 +598,9 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 				cr.Status = "failed"
 				cr.Error = fmt.Sprintf("cannot stage %s: %v", f.Path, err)
 				cr.Hint = "Check that the file exists and has changes."
+				if lh := lockHint(err); lh != "" {
+					cr.Hint = lh
+				}
 				// Reset staging on stage failure.
 				_ = runner.ResetHead()
 				cr.Files = append(cr.Files, fr)
@@ -617,6 +638,9 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 		cr.Status = "failed"
 		cr.Error = fmt.Sprintf("git commit failed: %v", err)
 		cr.Hint = fmt.Sprintf("Staging is intact. If a pre-commit hook failed, fix the issue and run 'git commit -m %q' manually, then re-plan remaining changes.", commit.Message)
+		if lh := lockHint(err); lh != "" {
+			cr.Hint = "Staging is intact. " + lh
+		}
 		// Do NOT reset staging on commit failure (leave intact for manual fix).
 		return cr
 	}
