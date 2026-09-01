@@ -293,14 +293,14 @@ Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you
 | Exit | Meaning | Recovery |
 |------|---------|----------|
 | 2 | Validation error. **No git state changed.** | Fix the plan per the `hint`, retry the same `hc run`. |
-| 3 | Execution error mid-plan. Some commits may exist. | The JSON result lists every commit with `status` and `sha` -- committed ones are done. Run `hc diff --json` again and write a NEW plan for the remaining changes only. |
+| 3 | Execution error mid-plan. Some commits may exist. | The JSON result lists every commit with `status` and `sha` -- committed ones are done. Fix the cause, then `hc run --continue`: it finishes the SAME plan with the SAME hunk indices, no rewriting. Re-plan from `hc diff --json` only when the fix changed the working tree, or hc says HEAD has moved. |
 
 Common validation errors:
 - `staging area is not clean` -- something is pre-staged. Run `git reset HEAD`, then retry.
 - `hunks [...] not assigned to any commit` / `has changes but is not in the plan` -- add the listed hunks/file to a commit or use `allow_unplanned`.
 - `hunk index N out of range` -- the diff changed since you read it. Re-run `hc diff --json` and re-plan.
 - `git commit failed` (exit 3) -- usually a pre-commit hook. Staging is left intact: fix the issue, run `git commit -m "<message>"` manually, then re-plan the rest.
-- `Unable to create '<path>/index.lock': File exists` (exit 3) -- another git process held the repository lock for the whole 2 s hc retries. The plan was never wrong: wait for that process (an editor, another agent) to finish and re-plan the rest, or raise the budget with `HC_LOCK_TIMEOUT=10s`.
+- `Unable to create '<path>/index.lock': File exists` (exit 3) -- another git process held the repository lock for the whole 2 s hc retries. The plan was never wrong: wait for that process (an editor, another agent) to finish, then `hc run --continue`. Raise the budget with `HC_LOCK_TIMEOUT=10s` if it keeps happening.
 
 ## Key Commands
 
@@ -313,6 +313,7 @@ Common validation errors:
 | `hc run plan.json` | Execute plan from file |
 | `hc run --prefix "WB-1234: " -` | Prepend a uniform prefix to every commit message |
 | `hc run --dry-run -` | Validate only (rarely needed; `run` validates first anyway) |
+| `hc run --continue` | Finish a plan a stopped run left part-way -- no plan argument, same hunk indices |
 | `hc log <base>..HEAD --files-only --json` | Cheap per-commit file survey (no hunk content) |
 | `hc log <base>..HEAD --json` | Per-commit indexed hunks WITH content (for hunk-level splits) |
 | `hc split <base>..HEAD` | Emit the default one-file-per-commit rewrite plan (review, then pipe) |
