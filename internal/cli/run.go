@@ -560,11 +560,18 @@ func executePlan(p *plan.Plan, states map[string]*fileState, runner *git.Runner,
 		result.Commits = append(result.Commits, cr)
 
 		if cr.Status == "failed" {
-			// Build hint based on progress.
-			if i == 0 {
-				result.Hint = "No commits were created. Fix the issue and re-run."
-			} else {
-				result.Hint = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
+			// Spec 6.3 puts the cause before the progress ("Fix the
+			// pre-commit hook issue. Commits 0-1 are done. ..."). Dropping
+			// the failed commit's own hint costs a caller that reads only
+			// the top-level fields the one thing it needs: lock contention
+			// then reads as a plan problem it should re-plan around.
+			progress := "No commits were created. Fix the issue and re-run."
+			if i > 0 {
+				progress = fmt.Sprintf("Commits 0-%d are done. Re-plan remaining changes.", i-1)
+			}
+			result.Hint = progress
+			if cr.Hint != "" {
+				result.Hint = cr.Hint + " " + progress
 			}
 			result.Error = cr.Error
 			result.Code = 3
