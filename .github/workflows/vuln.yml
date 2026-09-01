@@ -1,0 +1,39 @@
+name: Vulnerabilities
+
+# Deliberately NOT part of ci.yml. The gate in CLAUDE.md is four commands that
+# depend only on this repository's contents; govulncheck depends on an external
+# database that changes underneath an unchanged tree. Keeping it separate means
+# a red here says "the world changed", not "your commit is broken".
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # An advisory lands without anyone touching this repo, so the check has to
+    # run on a clock as well as on a commit. Mondays, 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      # govulncheck builds a call graph and reports only vulnerabilities hc's
+      # own code actually reaches, so a CVE in a dependency hc never calls does
+      # not fail this job. That is what makes it safe to gate on: a finding
+      # here is always actionable.
+      #
+      # Pinned by the same four rules as the tools in ci.yml -- exact version,
+      # equal to what runs locally (v1.6.0), compatible with this job's Go, and
+      # reviewed on a date, because a pin is a decision that rots.
+      # Review by 2026-12-01.
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+      - run: govulncheck ./...
