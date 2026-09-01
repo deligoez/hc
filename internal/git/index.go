@@ -61,3 +61,26 @@ func (r *Runner) IndexBlob(path string) ([]byte, error) {
 	}
 	return []byte(out), nil
 }
+
+// BaseBlob returns the content of path at ref, or the index content when ref
+// is empty.
+//
+// A path absent from ref reads as empty rather than as an error: that is a
+// file the plan creates, and its base really is nothing -- the same content
+// the empty intent-to-add index blob would have given. A genuinely broken
+// object store lands in the same branch, but it cannot pass unnoticed: the
+// caller then verifies base + every hunk against the working tree.
+func (r *Runner) BaseBlob(ref, path string) ([]byte, error) {
+	if ref == "" {
+		return r.IndexBlob(path)
+	}
+	spec := ref + ":" + path
+	if _, err := r.Run("cat-file", "-e", spec); err != nil {
+		return []byte{}, nil
+	}
+	out, err := r.Run("show", spec)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(out), nil
+}
