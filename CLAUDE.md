@@ -121,8 +121,17 @@ mutated package's own tests, so an unchanged package's verdicts cannot change.
 The same fact means efficacy UNDERSTATES detection -- package B's tests
 exercising package A never count toward A's mutants.
 
-Cost, measured: `internal/plan` is 30 mutants in ~4s; `internal/cli` is 426
-mutants in ~16 minutes. That is a release-time check, not a per-commit gate.
+Cost, measured: `internal/plan` is 30 mutants in ~4s and `internal/git` is 57
+in ~7s -- both cheap enough to run on any release. `internal/cli` is not, and
+the old figure here (426 mutants in ~16 minutes) is now wrong by roughly 8x:
+gremlins runs the package's whole test binary once per mutant, and that binary
+grew to **72 s** as the property tests were added (measured 2026-09-01,
+race-free). 426 mutants at `--workers 4` is therefore ~2 hours, not 16 minutes.
+
+Read that as a change in what the check IS, not just how long it takes: mutation
+testing `internal/cli` is a deliberate, scheduled exercise now, not a step in a
+release. Re-measure the binary before quoting a number -- the cost tracks the
+suite, so it moves every time a property test is added.
 
 **A surviving mutant is not a score to drive down.** Classify it: an equivalent
 mutant nothing can observe, an undocumented boundary, or a documented contract
