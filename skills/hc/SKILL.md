@@ -299,7 +299,7 @@ Every error is JSON with `error`, `code`, and `hint` fields. Exit codes tell you
 
 1. Read `commits[]` -- entries with `"status": "committed"` are done, with their SHAs.
 2. Clear what the `hint` names: wait out a lock, fix the pre-commit hook, free the disk.
-3. Run `git reset HEAD` **if a `git commit` failed** -- hc deliberately leaves that staging in place, and `--continue` needs a clean index. (A staging failure already reset it; nothing to do.)
+3. Run `git reset HEAD` **if anything is still staged** -- `--continue` needs a clean index. hc leaves staging in place after a `git commit` failure by design, and it can also fail to clear it after a staging failure: that reset needs the same lock that just refused the staging call. When that happens the `hint` says so.
 4. `hc run --continue` -- no plan argument, no `--prefix`; both come from the record the stopped run left behind.
 
 **Never commit manually to "finish" the failed commit.** That moves HEAD, `--continue` refuses a record whose HEAD moved, and you are back to rewriting the plan by hand -- exactly what `--continue` exists to avoid.
