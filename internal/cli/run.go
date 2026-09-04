@@ -703,6 +703,28 @@ func planFileResults(c plan.Commit) []output.FileResult {
 	return files
 }
 
+// resetStaging unstages whatever this commit had already put in the index,
+// and returns what to add to the hint when it could not.
+//
+// The reset is best-effort by nature: it needs the very index lock that just
+// refused the staging call. Measured -- a 40-file commit interrupted mid-way
+// left three files staged, because `git reset HEAD` lost the same race. Saying
+// nothing there is the expensive silence: the leftover staging is exactly what
+// makes `hc run --continue` refuse with "staging area is not clean", and the
+// agent has no way to know hc meant to clear it and failed.
+func resetStaging(runner *git.Runner) string {
+	if err := runner.ResetHead(); err == nil {
+		return ""
+	}
+	// A failed reset only matters if it actually stranded something. Losing
+	// the lock before the first file was staged fails the reset too, and
+	// warning there would send the agent after an index that is already clean.
+	if err := runner.EnsureCleanStaging(); err == nil {
+		return ""
+	}
+	return " hc could not unstage what it had already staged for this commit (the reset needs the same lock): run 'git reset HEAD' before continuing."
+}
+
 // executeCommit stages files for a single commit and creates it.
 func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, committed map[string]map[int]bool, runner *git.Runner) output.CommitResult {
 	cr := output.CommitResult{
@@ -723,7 +745,7 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 					cr.Hint = lh
 				}
 				// Reset staging on stage failure.
-				_ = runner.ResetHead()
+				cr.Hint += resetStaging(runner)
 				cr.Files = append(cr.Files, fr)
 				return cr
 			}
@@ -735,7 +757,7 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 			if !ok {
 				cr.Status = "failed"
 				cr.Error = fmt.Sprintf("%s not found in original diff", f.Path)
-				_ = runner.ResetHead()
+				cr.Hint += resetStaging(runner)
 				cr.Files = append(cr.Files, fr)
 				return cr
 			}
@@ -744,7 +766,7 @@ func executeCommit(idx int, commit plan.Commit, states map[string]*fileState, co
 				cr.Status = "failed"
 				cr.Error = se.msg
 				cr.Hint = se.hint
-				_ = runner.ResetHead()
+				cr.Hint += resetStaging(runner)
 				cr.Files = append(cr.Files, fr)
 				return cr
 			}
