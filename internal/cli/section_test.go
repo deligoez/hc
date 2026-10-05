@@ -315,3 +315,23 @@ func TestFencedCommentIsNotAHeading(t *testing.T) {
 		t.Errorf("one section must not warn, got: %s", w)
 	}
 }
+
+// TestLogFencedCommentIsNotAHeading: hc log (and so hc split --hunks) reads
+// the section from the parent commit, and must skip the fenced comment too.
+func TestLogFencedCommentIsNotAHeading(t *testing.T) {
+	r := commitFencedDoc(t)
+	must(t, run(r, "commit", "-am", "edit guide"))
+	out, acErr := runLog(r, "HEAD~1..HEAD", false)
+	if acErr != nil {
+		t.Fatalf("runLog: %v", acErr)
+	}
+	hunks := out.Commits[0].Files[0].Hunks
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	for i, h := range hunks {
+		if h.Section != "## Install" {
+			t.Errorf("hunk %d section = %q, want ## Install", i, h.Section)
+		}
+	}
+}
