@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deligoez/hc/internal/git"
 	"github.com/deligoez/hc/internal/plan"
 )
 
@@ -251,5 +252,66 @@ func TestMarkdownSectionsComeFromHeadings(t *testing.T) {
 				t.Errorf("prose mentions must not drive the warning, got: %s", w)
 			}
 		}
+	}
+}
+
+// fencedDoc has a shell comment inside a fenced block under "## Install".
+// Git's markdown driver reads that comment as a heading. FENCE stands for a
+// backtick fence, which a raw string cannot hold.
+var fencedDoc = strings.ReplaceAll(`# Guide
+
+## Install
+
+Run this:
+
+FENCEbash
+# 1. fetch the source
+git clone example
+FENCE
+
+Then build it.
+
+## Usage
+
+Use it.
+`, "FENCE", "```")
+
+// commitFencedDoc commits fencedDoc under the markdown driver and edits the
+// line above the fence and the line below it, both under "## Install".
+func commitFencedDoc(t *testing.T) *git.Runner {
+	t.Helper()
+	dir := t.TempDir()
+	r := initRepo(t, dir)
+	must(t, os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.md diff=markdown\n"), 0o644))
+	f := filepath.Join(dir, "guide.md")
+	must(t, os.WriteFile(f, []byte(fencedDoc), 0o644))
+	must(t, run(r, "add", "-A"))
+	must(t, run(r, "commit", "-m", "add guide"))
+	modified := strings.Replace(fencedDoc, "Run this:", "Run this first:", 1)
+	modified = strings.Replace(modified, "Then build it.", "Then build it twice.", 1)
+	must(t, os.WriteFile(f, []byte(modified), 0o644))
+	return r
+}
+
+// TestFencedCommentIsNotAHeading: a "# comment" in a code block must not
+// become the section of the prose below the block, or one section reads as
+// two and the granularity warning fires on a single idea.
+func TestFencedCommentIsNotAHeading(t *testing.T) {
+	r := commitFencedDoc(t)
+	result, err := runDiff(r)
+	if err != nil {
+		t.Fatalf("runDiff: %v", err)
+	}
+	hunks := result.Files[0].Hunks
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunks, got %d", len(hunks))
+	}
+	for i, h := range hunks {
+		if got := hunkSectionLabel("guide.md", h); got != "Install" {
+			t.Errorf("hunk %d label = %q, want Install (section %q)", i, got, h.Section)
+		}
+	}
+	if w := multiSectionWarning(singleCommitPlan("guide.md", 0, 1), result.Files); w != "" {
+		t.Errorf("one section must not warn, got: %s", w)
 	}
 }
