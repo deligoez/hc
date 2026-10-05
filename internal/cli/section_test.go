@@ -335,3 +335,37 @@ func TestLogFencedCommentIsNotAHeading(t *testing.T) {
 		}
 	}
 }
+
+// TestFencedLines pins the CommonMark fence rules the relabeling relies on.
+func TestFencedLines(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+		want string // one char per line: f = fenced, . = not
+	}{
+		{"backticks", "a\n```\n# x\n```\nb", ".fff."},
+		{"tildes", "~~~sh\n# x\n~~~\n# y", "fff."},
+		{"longer closer", "```\n# x\n`````\nb", "fff."},
+		{"shorter run does not close", "````\n```\n# x\n````\nb", "ffff."},
+		{"other char does not close", "```\n~~~\n# x\n```\nb", "ffff."},
+		{"closer with text does not close", "```\n``` x\n# y\n```", "ffff"},
+		{"backtick in info string is inline code", "```a`b\n# x", ".."},
+		{"four spaces is not a fence", "    ```\n# x", ".."},
+		{"three spaces is a fence", "   ```\n# x\n```", "fff"},
+		{"unclosed runs to the end", "a\n```\n# x", ".ff"},
+	}
+	for _, c := range cases {
+		got := fencedLines(strings.Split(c.doc, "\n"))
+		var b strings.Builder
+		for _, f := range got {
+			if f {
+				b.WriteByte('f')
+			} else {
+				b.WriteByte('.')
+			}
+		}
+		if b.String() != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, b.String(), c.want)
+		}
+	}
+}
