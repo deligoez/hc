@@ -107,6 +107,9 @@ func runSplit(runner *git.Runner, rangeArg, template string, hunksMode bool) (*p
 			return nil, 0, output.NewExecutionError(
 				fmt.Sprintf("cannot parse diff of %s: %v", sha, err), "")
 		}
+		relabelFencedHeadings(files, func(path string) ([]byte, error) {
+			return runner.BaseBlob(sha+"^", path)
+		})
 		if hunksMode {
 			expandNewFileHunks(runner, files)
 		}

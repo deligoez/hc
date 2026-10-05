@@ -109,6 +109,9 @@ func runLog(runner *git.Runner, rangeArg string, filesOnly bool) (*logOutputJSON
 			return nil, output.NewExecutionError(
 				fmt.Sprintf("cannot parse diff of %s: %v", sha, err), "")
 		}
+		relabelFencedHeadings(files, func(path string) ([]byte, error) {
+			return runner.BaseBlob(sha+"^", path)
+		})
 		expandNewFileHunks(runner, files)
 		for i := range files {
 			if filesOnly {

@@ -138,6 +138,9 @@ func runDiff(runner *git.Runner) (*diffResult, error) {
 			"",
 		)
 	}
+	relabelFencedHeadings(files, func(path string) ([]byte, error) {
+		return runner.BaseBlob("", path)
+	})
 
 	// Compute fingerprints for all hunks
 	for i := range files {

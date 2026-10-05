@@ -235,6 +235,116 @@ func headingLabel(section string) string {
 	return strings.TrimSpace(strings.TrimRight(s[level:], " \t#"))
 }
 
+// relabelFencedHeadings corrects the heading git reports for prose hunks.
+// Git's markdown driver matches any line that LOOKS like an ATX heading, and
+// it does not know about fenced code blocks: a "# comment" inside a ```bash
+// example becomes the section of every hunk below it until the next real
+// heading. That splits one section into two in `hc plan` and the granularity
+// warning, and shows the agent a shell comment as the section.
+//
+// Git takes the funcname from the hunk's PRE-image, so base returns that side
+// of the file (the index for a working-tree diff, the parent for a commit).
+// Only files where git reported a heading are read; a read error leaves the
+// file as git labeled it.
+func relabelFencedHeadings(files []diff.FileDiff, base func(path string) ([]byte, error)) {
+	for i := range files {
+		fd := &files[i]
+		if !isProseFile(fd.Path) || fd.IsNew || fd.IsBinary || !hasHeadingSection(fd.Hunks) {
+			continue
+		}
+		content, err := base(fd.Path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(content), "\n")
+		fenced := fencedLines(lines)
+		for j := range fd.Hunks {
+			if headingLabel(fd.Hunks[j].Section) != "" {
+				fd.Hunks[j].Section = unfencedHeading(lines, fenced, fd.Hunks[j])
+			}
+		}
+	}
+}
+
+func hasHeadingSection(hunks []diff.Hunk) bool {
+	for _, h := range hunks {
+		if headingLabel(h.Section) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// unfencedHeading finds the line git reported as h's section and, when that
+// line sits inside a fenced block, returns the nearest heading above it that
+// does not ("" when there is none). Git searches backwards from the line
+// before the hunk's first deleted line, or from the line a pure insertion
+// follows; starting at OldStart covers both, and a line that is not git's
+// match leaves the section unchanged.
+func unfencedHeading(lines []string, fenced []bool, h diff.Hunk) string {
+	want := strings.TrimSpace(h.Section)
+	for p := min(int(h.OldStart), len(lines)) - 1; p >= 0; p-- {
+		if !strings.HasPrefix(strings.TrimSpace(lines[p]), want) {
+			continue
+		}
+		if !fenced[p] {
+			return h.Section
+		}
+		for q := p - 1; q >= 0; q-- {
+			if !fenced[q] && headingLabel(lines[q]) != "" {
+				return strings.TrimRight(lines[q], " \t\r")
+			}
+		}
+		return ""
+	}
+	return h.Section
+}
+
+// fencedLines marks every line that belongs to a fenced code block, fences
+// included, following CommonMark: a run of three or more backticks or tildes
+// indented at most three spaces opens a block (a backtick fence whose info
+// string holds a backtick is inline code, not a fence), and a run of the same
+// character at least as long, with nothing after it, closes it. A block left
+// open runs to the end of the file.
+func fencedLines(lines []string) []bool {
+	fenced := make([]bool, len(lines))
+	var fenceChar byte
+	fenceLen := 0
+	for i, line := range lines {
+		char, n, rest := fenceRun(line)
+		switch {
+		case fenceLen == 0 && n >= 3 && (char == '~' || !strings.Contains(rest, "`")):
+			fenceChar, fenceLen = char, n
+			fenced[i] = true
+		case fenceLen > 0:
+			fenced[i] = true
+			if char == fenceChar && n >= fenceLen && strings.TrimSpace(rest) == "" {
+				fenceLen = 0
+			}
+		}
+	}
+	return fenced
+}
+
+// fenceRun returns the backtick or tilde run a line opens with (after at most
+// three spaces of indentation), its length, and what follows it.
+func fenceRun(line string) (char byte, n int, rest string) {
+	s := strings.TrimRight(line, "\r")
+	indent := 0
+	for indent < len(s) && indent < 4 && s[indent] == ' ' {
+		indent++
+	}
+	if indent > 3 || indent == len(s) || (s[indent] != '`' && s[indent] != '~') {
+		return 0, 0, ""
+	}
+	char = s[indent]
+	end := indent
+	for end < len(s) && s[end] == char {
+		end++
+	}
+	return char, end - indent, s[end:]
+}
+
 func isIdentByte(b byte) bool {
 	return b == '_' || b == '$' ||
 		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')

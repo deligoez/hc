@@ -356,15 +356,18 @@ func runPlanFrom(planData []byte, runner *git.Runner, dryRun bool, prefix string
 	// A commit whose hunk selection for one file spans multiple enclosing
 	// sections is often more than one idea. Mechanically undecidable (a
 	// single idea can touch several functions), so this only warns.
+	baseRef := ""
+	if resume != nil {
+		baseRef = resume.Base
+	}
+	relabelFencedHeadings(parsedFiles, func(path string) ([]byte, error) {
+		return runner.BaseBlob(baseRef, path)
+	})
 	if w := multiSectionWarning(p, parsedFiles); w != "" {
 		warnings = append(warnings, w)
 	}
 
 	// --- Step 8b: Capture base content for every hunk-mode file ---
-	baseRef := ""
-	if resume != nil {
-		baseRef = resume.Base
-	}
 	states, acErr := buildFileStates(p, parsedFiles, runner, baseRef)
 	if acErr != nil {
 		revertIntent()
