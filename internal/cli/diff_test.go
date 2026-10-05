@@ -18,6 +18,12 @@ func initRepo(t *testing.T, dir string) *git.Runner {
 	must(t, run(r, "init"))
 	must(t, run(r, "config", "user.email", "test@test.com"))
 	must(t, run(r, "config", "user.name", "Test"))
+	// No background housekeeping: git commit can detach an auto gc or
+	// maintenance run that is still writing to .git/objects when t.TempDir
+	// cleans up, which fails the test with "directory not empty" (seen on
+	// CI in TestManyFilesManyCommits).
+	must(t, run(r, "config", "gc.auto", "0"))
+	must(t, run(r, "config", "maintenance.auto", "false"))
 	// Create initial commit so HEAD exists
 	initial := filepath.Join(dir, ".gitkeep")
 	if err := os.WriteFile(initial, []byte(""), 0o644); err != nil {
